@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="logo.webp" />
+  <title>Stocks — Carino Systems</title>
+  <meta name="description" content="Client-side markets watchlist, portfolio and alerts. Your keys, your device. Monitoring only, never advice." />
+  <link rel="stylesheet" href="fonts/carino-fonts.css" />
+  <link rel="stylesheet" href="css/stocks.css" />
+</head>
+<body>
+  <!-- App controls; carino-navbar.js relocates this into the shared navbar. -->
+  <header class="cs-header" data-carino-strip>
+    <div class="cs-right" data-carino-actions>
+      <span class="live-chip" id="modeChip" title="Data source">DEMO</span>
+      <button class="cs-btn" id="btnPause" title="Pause / resume auto-refresh">⏸</button>
+      <select class="cs-btn cs-select" id="intervalSel" title="Refresh interval">
+        <option value="5">5s</option><option value="15" selected>15s</option>
+        <option value="30">30s</option><option value="60">60s</option>
+      </select>
+      <button class="cs-btn" id="btnAdd" title="Add ticker">＋</button>
+      <div class="seg" role="group" aria-label="View">
+        <button class="cs-btn seg-btn active" id="viewWatch">Watchlist</button>
+        <button class="cs-btn seg-btn" id="viewPort">Portfolio</button>
+      </div>
+      <button class="cs-btn" id="btnPrivacy" title="Blur amounts">👁</button>
+      <button class="cs-btn" id="btnAlerts" title="Alert rules">🔔</button>
+      <button class="cs-btn" id="btnSettings" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- Market status strip -->
+  <div class="market-strip" id="marketStrip" hidden>
+    <div class="mkt-tiles" id="mktTiles"></div>
+    <div class="mkt-meta">
+      <span class="live-chip" id="mktState">—</span>
+      <span class="mkt-updated" id="mktUpdated"></span>
+      <span class="mkt-note">Delayed · not investment advice</span>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <!-- Left rail -->
+    <aside class="ws-side" id="rail">
+      <div class="rail-search">
+        <input type="text" class="input" id="railSearch" placeholder="Add symbol (e.g. AAPL)…" autocomplete="off" spellcheck="false" />
+        <div class="autocomplete" id="railAuto" hidden></div>
+      </div>
+      <div class="rail-sort">
+        <span class="rail-lbl">Watchlist</span>
+        <select class="cs-select sm" id="sortSel" title="Sort">
+          <option value="added">Recent</option>
+          <option value="change">Change %</option>
+          <option value="alpha">A–Z</option>
+        </select>
+      </div>
+      <div class="rail-list" id="railList"></div>
+      <div class="rail-foot">
+        <div class="quota" id="quotaBox" hidden>
+          <span class="rail-lbl">API credits</span>
+          <div class="progress"><div class="progress-bar" id="quotaBar"></div></div>
+          <span class="quota-txt" id="quotaTxt"></span>
+        </div>
+        <p class="disclaimer-mini" id="railDisclaimer"></p>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="ws-main" id="main">
+      <section id="watchView">
+        <div class="card-grid" id="cardGrid"></div>
+        <div class="empty-state" id="emptyState" hidden>
+          <div class="empty-icon">📈</div>
+          <p>Your watchlist is empty.</p>
+          <div class="empty-actions">
+            <button class="btn-primary" id="emptyAdd">Add a ticker</button>
+            <button class="cs-btn" id="emptyDemo">Load demo watchlist</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="portView" hidden>
+        <div class="stat-row" id="portStats"></div>
+        <div class="table-wrap">
+          <table class="data" id="portTable">
+            <thead><tr>
+              <th>Symbol</th><th class="num">Shares</th><th class="num">Avg Cost</th>
+              <th class="num">Last</th><th class="num">Mkt Value</th><th class="num">Day</th>
+              <th class="num">Total P/L</th><th class="num">Weight</th><th></th>
+            </tr></thead>
+            <tbody id="portBody"></tbody>
+          </table>
+        </div>
+        <button class="btn-primary" id="addHolding">＋ Add holding</button>
+      </section>
+    </main>
+  </div>
+
+  <!-- Detail drawer -->
+  <div class="scrim" id="drawerScrim" hidden></div>
+  <aside class="drawer" id="drawer" hidden aria-hidden="true">
+    <div class="drawer-head">
+      <div class="drawer-title" id="drawerTitle">—</div>
+      <button class="modal-x" id="drawerClose" aria-label="Close">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
+  <!-- Modals -->
+  <div class="modal-scrim" id="modalScrim" hidden>
+    <!-- Settings -->
+    <div class="modal" id="settingsModal" hidden>
+      <div class="modal-head"><div class="modal-title">Settings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <p class="field-note">Bring your own free, read-only API keys. They are stored only in this browser and sent only to the provider.</p>
+        <label class="field"><span>Finnhub API key</span>
+          <input type="password" class="input" id="setFinnhub" placeholder="finnhub.io free key" autocomplete="off" /></label>
+        <label class="field"><span>Twelve Data API key</span>
+          <input type="password" class="input" id="setTwelve" placeholder="twelvedata.com free key" autocomplete="off" /></label>
+        <div class="field-row">
+          <label class="field"><span>Provider</span>
+            <select class="input" id="setProvider">
+              <option value="auto">Auto</option><option value="finnhub">Finnhub</option>
+              <option value="twelvedata">Twelve Data</option><option value="demo">Demo</option>
+            </select></label>
+          <label class="field"><span>Refresh (s)</span>
+            <input type="number" class="input" id="setInterval" min="5" max="600" /></label>
+        </div>
+        <div class="toggles">
+          <label class="chk"><input type="checkbox" id="setNotify" /> Browser notifications on alert</label>
+          <label class="chk"><input type="checkbox" id="setSound" /> Sound on alert</label>
+          <label class="chk"><input type="checkbox" id="setMarket" /> Show market-status strip</label>
+          <label class="chk"><input type="checkbox" id="setPrivacy" /> Blur amounts by default</label>
+        </div>
+        <div class="key-status" id="keyStatus"></div>
+        <div class="field-note">
+          <a href="https://finnhub.io/register" target="_blank" rel="noopener">Get a Finnhub key ↗</a> ·
+          <a href="https://twelvedata.com/pricing" target="_blank" rel="noopener">Get a Twelve Data key ↗</a>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="cs-btn danger" id="btnClearData">Clear all data</button>
+        <span class="spacer"></span>
+        <button class="cs-btn" id="btnExport">Export</button>
+        <button class="cs-btn" id="btnImport">Import</button>
+        <button class="btn-primary" id="btnSaveSettings">Save</button>
+      </div>
+    </div>
+
+    <!-- Add ticker -->
+    <div class="modal" id="addModal" hidden>
+      <div class="modal-head"><div class="modal-title">Add ticker</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <input type="text" class="input" id="addSearch" placeholder="Search symbol or company…" autocomplete="off" />
+        <div class="autocomplete inline" id="addAuto"></div>
+      </div>
+    </div>
+
+    <!-- Alerts -->
+    <div class="modal" id="alertsModal" hidden>
+      <div class="modal-head"><div class="modal-title">Alert rules</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <div class="rule-add">
+          <select class="input" id="ruleSym"></select>
+          <select class="input" id="ruleType"><option value="price">Price</option><option value="pct">Change %</option></select>
+          <select class="input" id="ruleOp"><option value="above">≥</option><option value="below">≤</option></select>
+          <input type="number" class="input" id="ruleVal" placeholder="value" step="any" />
+          <button class="btn-primary" id="ruleAdd">Add</button>
+        </div>
+        <div class="rule-list" id="ruleList"></div>
+        <div class="alert-log" id="alertLog"></div>
+      </div>
+    </div>
+
+    <!-- Holding editor -->
+    <div class="modal" id="holdingModal" hidden>
+      <div class="modal-head"><div class="modal-title" id="holdingTitle">Add holding</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <label class="field"><span>Symbol</span><input type="text" class="input" id="holdSym" autocomplete="off" /></label>
+        <div class="field-row">
+          <label class="field"><span>Shares</span><input type="number" class="input" id="holdShares" step="any" /></label>
+          <label class="field"><span>Cost</span><input type="number" class="input" id="holdCost" step="any" /></label>
+          <label class="field"><span>Basis</span><select class="input" id="holdMode"><option value="per">Per share</option><option value="total">Total</option></select></label>
+        </div>
+        <label class="field"><span>Note (optional)</span><input type="text" class="input" id="holdNote" autocomplete="off" /></label>
+      </div>
+      <div class="modal-foot">
+        <button class="cs-btn danger" id="holdDelete" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button class="btn-primary" id="holdSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import file input (hidden) -->
+  <input type="file" id="importFile" accept="application/json,.json" hidden />
+
+  <!-- Toast rack -->
+  <div class="toast-rack" id="toastRack"></div>
+
+  <!-- Footer disclaimer -->
+  <footer class="page-disclaimer" id="pageDisclaimer"></footer>
+
+  <!-- First-load acknowledgment gate -->
+  <div class="ack-gate" id="ackGate" hidden>
+    <div class="ack-card">
+      <div class="ack-brand">Carino <span>Stocks</span></div>
+      <p class="ack-text" id="ackText"></p>
+      <button class="btn-primary" id="ackBtn">I understand — continue</button>
+    </div>
+  </div>
+
+  <script src="carino-navbar.js" data-app="Stocks" defer></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
