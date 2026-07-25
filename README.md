@@ -28,7 +28,7 @@ Bring your own free, read-only API keys in **Settings** (stored only in your bro
 | [Alpaca](https://alpaca.markets/) | batched US-equity snapshots (key **and** secret; use a paper/read-only key) | account-gated |
 | [CoinGecko](https://www.coingecko.com/en/api) | crypto quotes + charts, **keyless** | public |
 
-**Auto mode** (default) routes each symbol by asset class — equities to your stock provider, crypto to CoinGecko (no key), FX to Twelve Data — and **groups symbols so each provider gets one batched call** per refresh. Or pick a specific provider to force it for everything it supports. With no key it runs in **Demo mode** on bundled sample data. The refresh loop is visibility-aware (pauses on hidden tabs) and backs off on rate limits.
+Pick a **provider** from the dropdown and its key fields appear (only that provider's). A **universal** toggle decides how it's used — **on** (default, **Finnhub**) uses that one provider for every symbol; **off** enables **auto-route**: each symbol goes to a provider that covers its asset class — equities to the selected stock provider, crypto to CoinGecko (no key), FX to Twelve Data. Either way, symbols are **grouped so each provider gets one batched call** per refresh. With no key it runs in **Demo mode** on bundled sample data. The refresh loop is visibility-aware (pauses on hidden tabs) and backs off on rate limits.
 
 > ⚠️ Alpaca keys grant account access and its data API may be blocked by browser CORS — prefer a paper/read-only key.
 

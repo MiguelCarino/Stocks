@@ -411,6 +411,8 @@ function wireModals() {
   wireAutocomplete($('addSearch'), $('addAuto'), (sym) => { store.addSymbol(sym); closeModal(); refreshAll(); });
 
   // Settings
+  $('setProvider').addEventListener('change', updateProviderConfig);
+  $('setUniversal').addEventListener('change', updateProviderConfig);
   $('btnSaveSettings').addEventListener('click', saveSettings);
   $('btnExport').addEventListener('click', doExport);
   $('btnImport').addEventListener('click', () => $('importFile').click());
@@ -433,9 +435,26 @@ function applySettingsToUI() {
   $('setFinnhub').value = s.finnhubKey; $('setTwelve').value = s.twelvedataKey;
   $('setPolygon').value = s.polygonKey; $('setAlpha').value = s.alphaVantageKey;
   $('setAlpacaId').value = s.alpacaKeyId; $('setAlpacaSecret').value = s.alpacaSecret;
-  $('setProvider').value = s.provider; $('setInterval').value = s.interval;
+  // Derive the toggle + dropdown from the (possibly legacy) stored provider.
+  const universal = s.provider !== 'auto';
+  const selected = universal ? s.provider : (s.selectedProvider || 'finnhub');
+  $('setUniversal').checked = universal;
+  $('setProvider').value = selected;
+  $('setInterval').value = s.interval;
   $('setNotify').checked = s.notify; $('setSound').checked = s.sound;
   $('setMarket').checked = s.showMarket; $('setPrivacy').checked = s.privacy;
+  updateProviderConfig();
+}
+
+// Show only the selected provider's key fields; update the mode note.
+const PROVIDER_LABELS = { finnhub: 'Finnhub', twelvedata: 'Twelve Data', polygon: 'Polygon', alpaca: 'Alpaca', alphavantage: 'Alpha Vantage', demo: 'Demo' };
+function updateProviderConfig() {
+  const sel = $('setProvider').value;
+  for (const box of document.querySelectorAll('.provider-config')) box.hidden = box.dataset.provider !== sel;
+  const universal = $('setUniversal').checked;
+  $('providerModeNote').textContent = universal
+    ? `Every symbol uses ${PROVIDER_LABELS[sel] || sel}.`
+    : 'Auto-route: equities use the selected stock provider, crypto uses CoinGecko (keyless), FX uses Twelve Data. Symbols are grouped so each provider gets one batched call — add keys for whichever providers you use.';
 }
 function openSettings() { openModal('settingsModal', () => { applySettingsToUI(); $('keyStatus').textContent = ''; }); }
 async function saveSettings() {
@@ -446,7 +465,9 @@ async function saveSettings() {
   s.alphaVantageKey = $('setAlpha').value.trim();
   s.alpacaKeyId = $('setAlpacaId').value.trim();
   s.alpacaSecret = $('setAlpacaSecret').value.trim();
-  s.provider = $('setProvider').value;
+  s.selectedProvider = $('setProvider').value;
+  s.universal = $('setUniversal').checked;
+  s.provider = s.universal ? s.selectedProvider : 'auto';   // derived: the router's input
   s.interval = Math.max(5, Math.min(600, +$('setInterval').value || 15));
   s.notify = $('setNotify').checked; s.sound = $('setSound').checked;
   s.showMarket = $('setMarket').checked; s.privacy = $('setPrivacy').checked;

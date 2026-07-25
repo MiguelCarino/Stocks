@@ -19,7 +19,9 @@ const DEFAULT_SETTINGS = {
   alphaVantageKey: '',
   alpacaKeyId: '',
   alpacaSecret: '',
-  provider: 'auto',        // auto | finnhub | twelvedata | polygon | alpaca | alphavantage | demo
+  universal: true,         // true: use `selectedProvider` for all symbols; false: auto-route by asset class
+  selectedProvider: 'finnhub',   // the provider chosen in Settings (and configured)
+  provider: 'finnhub',     // DERIVED: universal ? selectedProvider : 'auto' — the router's input
   interval: 15,            // seconds between refreshes
   notify: false,           // browser Notification on alert
   sound: false,            // beep on alert

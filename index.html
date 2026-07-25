@@ -114,35 +114,51 @@
       <div class="modal-head"><div class="modal-title">Settings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
         <p class="field-note">Bring your own free, read-only API keys. They are stored only in this browser and sent only to the provider.</p>
-        <label class="field"><span>Finnhub API key</span>
-          <input type="password" class="input" id="setFinnhub" placeholder="finnhub.io free key" autocomplete="off" /></label>
-        <label class="field"><span>Twelve Data API key</span>
-          <input type="password" class="input" id="setTwelve" placeholder="twelvedata.com free key" autocomplete="off" /></label>
-        <label class="field"><span>Polygon API key</span>
-          <input type="password" class="input" id="setPolygon" placeholder="polygon.io key" autocomplete="off" /></label>
-        <label class="field"><span>Alpha Vantage API key</span>
-          <input type="password" class="input" id="setAlpha" placeholder="alphavantage.co key" autocomplete="off" /></label>
-        <div class="field-row">
-          <label class="field"><span>Alpaca key ID</span>
-            <input type="password" class="input" id="setAlpacaId" placeholder="Alpaca key id" autocomplete="off" /></label>
-          <label class="field"><span>Alpaca secret</span>
-            <input type="password" class="input" id="setAlpacaSecret" placeholder="Alpaca secret" autocomplete="off" /></label>
-        </div>
         <div class="field-row">
           <label class="field"><span>Provider</span>
             <select class="input" id="setProvider">
-              <option value="auto">Auto (route by asset class)</option>
               <option value="finnhub">Finnhub</option>
               <option value="twelvedata">Twelve Data</option>
               <option value="polygon">Polygon</option>
               <option value="alpaca">Alpaca</option>
               <option value="alphavantage">Alpha Vantage</option>
-              <option value="demo">Demo</option>
+              <option value="demo">Demo (no key)</option>
             </select></label>
           <label class="field"><span>Refresh (s)</span>
             <input type="number" class="input" id="setInterval" min="5" max="600" /></label>
         </div>
-        <p class="field-note"><strong>Auto</strong> routes each symbol by asset class — equities to your stock provider, crypto to CoinGecko (keyless), FX to Twelve Data — and groups symbols so each provider gets one batched call. Pick a specific provider to force it for everything it supports. <strong>Alpaca</strong> keys grant account access and may be blocked by browser CORS; use a paper / read-only key.</p>
+        <label class="chk"><input type="checkbox" id="setUniversal" /> Use this provider for <strong>all</strong> symbols (universal). Off = auto-route each symbol by asset class.</label>
+
+        <!-- Per-provider key config; only the selected provider's block is shown. -->
+        <div class="provider-config" data-provider="finnhub">
+          <label class="field"><span>Finnhub API key</span>
+            <input type="password" class="input" id="setFinnhub" placeholder="finnhub.io free key" autocomplete="off" /></label>
+        </div>
+        <div class="provider-config" data-provider="twelvedata" hidden>
+          <label class="field"><span>Twelve Data API key</span>
+            <input type="password" class="input" id="setTwelve" placeholder="twelvedata.com free key" autocomplete="off" /></label>
+        </div>
+        <div class="provider-config" data-provider="polygon" hidden>
+          <label class="field"><span>Polygon API key</span>
+            <input type="password" class="input" id="setPolygon" placeholder="polygon.io key" autocomplete="off" /></label>
+        </div>
+        <div class="provider-config" data-provider="alphavantage" hidden>
+          <label class="field"><span>Alpha Vantage API key</span>
+            <input type="password" class="input" id="setAlpha" placeholder="alphavantage.co key" autocomplete="off" /></label>
+        </div>
+        <div class="provider-config" data-provider="alpaca" hidden>
+          <div class="field-row">
+            <label class="field"><span>Alpaca key ID</span>
+              <input type="password" class="input" id="setAlpacaId" placeholder="Alpaca key id" autocomplete="off" /></label>
+            <label class="field"><span>Alpaca secret</span>
+              <input type="password" class="input" id="setAlpacaSecret" placeholder="Alpaca secret" autocomplete="off" /></label>
+          </div>
+          <p class="field-note">⚠️ Alpaca keys grant account access and may be blocked by browser CORS — use a paper / read-only key.</p>
+        </div>
+        <div class="provider-config" data-provider="demo" hidden>
+          <p class="field-note">Demo mode uses bundled sample data — no key required.</p>
+        </div>
+        <p class="field-note" id="providerModeNote"></p>
         <div class="toggles">
           <label class="chk"><input type="checkbox" id="setNotify" /> Browser notifications on alert</label>
           <label class="chk"><input type="checkbox" id="setSound" /> Sound on alert</label>
