@@ -22,9 +22,15 @@ Bring your own free, read-only API keys in **Settings** (stored only in your bro
 | Provider | Powers | Free tier |
 |----------|--------|-----------|
 | [Finnhub](https://finnhub.io/register) | real-time-ish US quotes, profiles, search, market status | ~60 req/min |
-| [Twelve Data](https://twelvedata.com/pricing) | sparklines + detail charts, batched fallback quotes | ~800 req/day |
+| [Twelve Data](https://twelvedata.com/pricing) | sparklines + detail charts, FX, batched quotes | ~800 req/day |
+| [Polygon](https://polygon.io/) | batched US-equity snapshots + candles | ~5 req/min |
+| [Alpha Vantage](https://www.alphavantage.co/support/#api-key) | equities + FX fallback | ~25 req/day |
+| [Alpaca](https://alpaca.markets/) | batched US-equity snapshots (key **and** secret; use a paper/read-only key) | account-gated |
+| [CoinGecko](https://www.coingecko.com/en/api) | crypto quotes + charts, **keyless** | public |
 
-With no key it runs in **Demo mode** on bundled sample data. Provider selection is automatic by which keys exist; the refresh loop is visibility-aware (pauses on hidden tabs) and backs off on rate limits.
+**Auto mode** (default) routes each symbol by asset class — equities to your stock provider, crypto to CoinGecko (no key), FX to Twelve Data — and **groups symbols so each provider gets one batched call** per refresh. Or pick a specific provider to force it for everything it supports. With no key it runs in **Demo mode** on bundled sample data. The refresh loop is visibility-aware (pauses on hidden tabs) and backs off on rate limits.
+
+> ⚠️ Alpaca keys grant account access and its data API may be blocked by browser CORS — prefer a paper/read-only key.
 
 ## Architecture
 

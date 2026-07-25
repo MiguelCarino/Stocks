@@ -15,7 +15,11 @@ const K = {
 const DEFAULT_SETTINGS = {
   finnhubKey: '',
   twelvedataKey: '',
-  provider: 'auto',        // auto | finnhub | twelvedata | demo
+  polygonKey: '',
+  alphaVantageKey: '',
+  alpacaKeyId: '',
+  alpacaSecret: '',
+  provider: 'auto',        // auto | finnhub | twelvedata | polygon | alpaca | alphavantage | demo
   interval: 15,            // seconds between refreshes
   notify: false,           // browser Notification on alert
   sound: false,            // beep on alert
@@ -112,7 +116,11 @@ export const store = {
     if (Array.isArray(d.holdings)) { this.holdings = d.holdings; this.saveHoldings(); }
     if (d.settings && typeof d.settings === 'object') {
       // Keys are never in the export; keep whatever is already configured locally.
-      const keep = { finnhubKey: this.settings.finnhubKey, twelvedataKey: this.settings.twelvedataKey };
+      const s = this.settings;
+      const keep = {
+        finnhubKey: s.finnhubKey, twelvedataKey: s.twelvedataKey, polygonKey: s.polygonKey,
+        alphaVantageKey: s.alphaVantageKey, alpacaKeyId: s.alpacaKeyId, alpacaSecret: s.alpacaSecret,
+      };
       this.settings = { ...DEFAULT_SETTINGS, ...d.settings, ...keep };
       this.saveSettings();
     }
@@ -126,5 +134,7 @@ export function normalizeSymbol(s) {
   return String(s || '').toUpperCase().trim().replace(/[^A-Z0-9.\-]/g, '');
 }
 function redactKeys(settings) {
-  const c = { ...settings }; delete c.finnhubKey; delete c.twelvedataKey; return c;
+  const c = { ...settings };
+  for (const k of ['finnhubKey', 'twelvedataKey', 'polygonKey', 'alphaVantageKey', 'alpacaKeyId', 'alpacaSecret']) delete c[k];
+  return c;
 }

@@ -28,6 +28,8 @@ register({
   id: 'demo',
   label: 'Demo',
   needsKey: false,
+  classes: ['equity', 'fx', 'crypto'],
+  batch: true,
 
   async quote(symbols) {
     const d = await load();

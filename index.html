@@ -118,15 +118,31 @@
           <input type="password" class="input" id="setFinnhub" placeholder="finnhub.io free key" autocomplete="off" /></label>
         <label class="field"><span>Twelve Data API key</span>
           <input type="password" class="input" id="setTwelve" placeholder="twelvedata.com free key" autocomplete="off" /></label>
+        <label class="field"><span>Polygon API key</span>
+          <input type="password" class="input" id="setPolygon" placeholder="polygon.io key" autocomplete="off" /></label>
+        <label class="field"><span>Alpha Vantage API key</span>
+          <input type="password" class="input" id="setAlpha" placeholder="alphavantage.co key" autocomplete="off" /></label>
+        <div class="field-row">
+          <label class="field"><span>Alpaca key ID</span>
+            <input type="password" class="input" id="setAlpacaId" placeholder="Alpaca key id" autocomplete="off" /></label>
+          <label class="field"><span>Alpaca secret</span>
+            <input type="password" class="input" id="setAlpacaSecret" placeholder="Alpaca secret" autocomplete="off" /></label>
+        </div>
         <div class="field-row">
           <label class="field"><span>Provider</span>
             <select class="input" id="setProvider">
-              <option value="auto">Auto</option><option value="finnhub">Finnhub</option>
-              <option value="twelvedata">Twelve Data</option><option value="demo">Demo</option>
+              <option value="auto">Auto (route by asset class)</option>
+              <option value="finnhub">Finnhub</option>
+              <option value="twelvedata">Twelve Data</option>
+              <option value="polygon">Polygon</option>
+              <option value="alpaca">Alpaca</option>
+              <option value="alphavantage">Alpha Vantage</option>
+              <option value="demo">Demo</option>
             </select></label>
           <label class="field"><span>Refresh (s)</span>
             <input type="number" class="input" id="setInterval" min="5" max="600" /></label>
         </div>
+        <p class="field-note"><strong>Auto</strong> routes each symbol by asset class — equities to your stock provider, crypto to CoinGecko (keyless), FX to Twelve Data — and groups symbols so each provider gets one batched call. Pick a specific provider to force it for everything it supports. <strong>Alpaca</strong> keys grant account access and may be blocked by browser CORS; use a paper / read-only key.</p>
         <div class="toggles">
           <label class="chk"><input type="checkbox" id="setNotify" /> Browser notifications on alert</label>
           <label class="chk"><input type="checkbox" id="setSound" /> Sound on alert</label>

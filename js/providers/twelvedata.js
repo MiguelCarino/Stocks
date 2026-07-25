@@ -3,6 +3,7 @@
    fallback quote source when no Finnhub key is present. */
 
 import { register, normQuote, getJSON, num } from './base.js';
+import { classify, fxPair, cryptoBase } from './assetclass.js';
 
 const BASE = 'https://api.twelvedata.com';
 let KEY = '';
@@ -14,21 +15,36 @@ const RANGE = {
   '1Y': { interval: '1week', outputsize: 52 },
 };
 
+// Twelve Data wants slash notation for non-equities: EUR/USD, BTC/USD. Our
+// symbols arrive compacted (EURUSD, BTC), so reformat by asset class.
+function tdSymbol(sym) {
+  const c = classify(sym);
+  if (c === 'fx') { const [a, b] = fxPair(sym); return `${a}/${b}`; }
+  if (c === 'crypto') { return `${cryptoBase(sym)}/USD`; }
+  return sym;
+}
+
 register({
   id: 'twelvedata',
   label: 'Twelve Data',
   needsKey: true,
+  classes: ['equity', 'fx', 'crypto'],
+  batch: true,
   hasSeries: true,
 
   async quote(symbols) {
-    // One batched call for the whole watchlist (comma-separated).
-    const r = await getJSON(`${BASE}/quote?symbol=${encodeURIComponent(symbols.join(','))}&apikey=${KEY}`);
+    // One batched call for the whole group (comma-separated), keyed by the
+    // Twelve Data symbol and mapped back to the app's symbol.
+    const back = new Map();   // tdSym -> appSym
+    const tdSyms = symbols.map((s) => { const t = tdSymbol(s); back.set(t, s); return t; });
+    const r = await getJSON(`${BASE}/quote?symbol=${encodeURIComponent(tdSyms.join(','))}&apikey=${KEY}`);
     const out = {};
-    const rows = symbols.length === 1 ? { [symbols[0]]: r } : r;
-    for (const sym of symbols) {
-      const q = rows[sym];
+    const rows = tdSyms.length === 1 ? { [tdSyms[0]]: r } : r;
+    for (const tdSym of tdSyms) {
+      const q = rows[tdSym];
+      const appSym = back.get(tdSym);
       if (!q || q.status === 'error' || q.close == null) continue;
-      out[sym] = normQuote(sym, {
+      out[appSym] = normQuote(appSym, {
         price: q.close, prevClose: q.previous_close, open: q.open, high: q.high, low: q.low,
         volume: q.volume, changePct: q.percent_change, change: q.change, currency: q.currency,
       }, 'twelvedata');
@@ -38,7 +54,7 @@ register({
 
   async series(sym, range = '1D') {
     const cfg = RANGE[range] || RANGE['1D'];
-    const r = await getJSON(`${BASE}/time_series?symbol=${encodeURIComponent(sym)}&interval=${cfg.interval}&outputsize=${cfg.outputsize}&apikey=${KEY}`);
+    const r = await getJSON(`${BASE}/time_series?symbol=${encodeURIComponent(tdSymbol(sym))}&interval=${cfg.interval}&outputsize=${cfg.outputsize}&apikey=${KEY}`);
     if (!r || r.status === 'error' || !Array.isArray(r.values)) return [];
     // Twelve Data returns newest-first; the app wants oldest-first closes.
     return r.values.map((v) => num(v.close)).filter((n) => n != null).reverse();

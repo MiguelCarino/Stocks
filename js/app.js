@@ -431,6 +431,8 @@ function wireModals() {
 function applySettingsToUI() {
   const s = store.settings;
   $('setFinnhub').value = s.finnhubKey; $('setTwelve').value = s.twelvedataKey;
+  $('setPolygon').value = s.polygonKey; $('setAlpha').value = s.alphaVantageKey;
+  $('setAlpacaId').value = s.alpacaKeyId; $('setAlpacaSecret').value = s.alpacaSecret;
   $('setProvider').value = s.provider; $('setInterval').value = s.interval;
   $('setNotify').checked = s.notify; $('setSound').checked = s.sound;
   $('setMarket').checked = s.showMarket; $('setPrivacy').checked = s.privacy;
@@ -440,6 +442,10 @@ async function saveSettings() {
   const s = store.settings;
   s.finnhubKey = $('setFinnhub').value.trim();
   s.twelvedataKey = $('setTwelve').value.trim();
+  s.polygonKey = $('setPolygon').value.trim();
+  s.alphaVantageKey = $('setAlpha').value.trim();
+  s.alpacaKeyId = $('setAlpacaId').value.trim();
+  s.alpacaSecret = $('setAlpacaSecret').value.trim();
   s.provider = $('setProvider').value;
   s.interval = Math.max(5, Math.min(600, +$('setInterval').value || 15));
   s.notify = $('setNotify').checked; s.sound = $('setSound').checked;
@@ -457,6 +463,9 @@ async function saveSettings() {
   const parts = [];
   if (s.finnhubKey) parts.push('Finnhub ' + (await market.validate('finnhub').catch(() => false) ? '✓' : '✕'));
   if (s.twelvedataKey) parts.push('Twelve Data ' + (await market.validate('twelvedata').catch(() => false) ? '✓' : '✕'));
+  if (s.polygonKey) parts.push('Polygon ' + (await market.validate('polygon').catch(() => false) ? '✓' : '✕'));
+  if (s.alphaVantageKey) parts.push('Alpha Vantage ' + (await market.validate('alphavantage').catch(() => false) ? '✓' : '✕'));
+  if (s.alpacaKeyId && s.alpacaSecret) parts.push('Alpaca ' + (await market.validate('alpaca').catch(() => false) ? '✓' : '✕'));
   status.textContent = parts.join('  ·  ') || 'Demo mode (no keys).';
   refreshAll();
 }

@@ -13,6 +13,8 @@ register({
   id: 'finnhub',
   label: 'Finnhub',
   needsKey: true,
+  classes: ['equity'],
+  batch: false,
   hasSeries: false,
 
   async quote(symbols) {
