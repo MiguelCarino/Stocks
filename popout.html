@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="logo.webp" />
+  <title>Panel — Carino Stocks</title>
+  <meta name="description" content="Detached display panel for Carino Stocks. Receives quotes from the main window; never fetches." />
+  <link rel="stylesheet" href="fonts/carino-fonts.css" />
+  <link rel="stylesheet" href="css/stocks.css" />
+  <style>
+    /* Popout-only styling. It lives here rather than in css/stocks.css because a
+       detached panel is a different medium from the app: no navbar, no chrome to
+       speak of, and type sized to be read from across a room instead of from a
+       desk. Everything scales off vmin so one stylesheet serves a 320x90 strip
+       docked to a taskbar and a 4K board filling a second monitor. */
+    /* height, not min-height: the app shell grows with content, a panel never
+       does — anything that does not fit is the panel's problem to clip. */
+    body.po {
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+      background: var(--bg);
+      cursor: default;
+    }
+    .po-shell { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+    .po-body { flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 2.2vmin; }
+
+    /* Chrome: one thin line of truth (title, session, staleness) that never
+       competes with the numbers but is always present. */
+    .po-bar {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+      padding: 5px 10px; border-top: 1px solid var(--border); background: var(--bg-elev);
+      font-family: var(--mono); font-size: .6rem; color: var(--text-muted);
+    }
+    .po-title { color: var(--text-sec); letter-spacing: .1em; text-transform: uppercase; }
+    .po-spacer { flex: 1; }
+    .po-hint { white-space: nowrap; opacity: .55; }
+    .chip {
+      font-family: var(--mono); font-size: .58rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; white-space: nowrap;
+      border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; color: var(--text-muted);
+    }
+    .chip[hidden] { display: none; }
+    .chip.ok   { color: var(--ok);  border-color: rgba(34,197,94,.4); }
+    .chip.warn { color: var(--warn); border-color: rgba(234,179,8,.45); }
+    .chip.bad  { color: var(--err); border-color: rgba(239,68,68,.45); }
+
+    /* Staleness is the only state allowed to change how the numbers themselves
+       look: desaturated and dimmed, so a frozen panel cannot be mistaken for a
+       live one at a glance.
+       A shut market and a dead feed can be true at once, and the dead feed is the
+       one worth seeing, so the :not() keeps the two rules from racing on source
+       order — otherwise the quiet-market dimming would mask a panel that has
+       actually stopped receiving anything. */
+    body.po.is-shut:not(.is-stale) .po-body { opacity: .82; }
+    body.po.is-stale .po-body { opacity: .38; filter: grayscale(.85); transition: opacity .3s, filter .3s; }
+
+    /* In the layout flow rather than floating over it: a fired alert is worth a
+       reflow, and an overlay would hide the very numbers it is talking about. */
+    .po-alert {
+      flex-shrink: 0;
+      padding: 6px 10px; background: var(--accent); color: #050505;
+      font-family: var(--mono); font-size: .68rem; font-weight: 700;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .po-alert[hidden] { display: none; }
+
+    .po-empty {
+      height: 100%; display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: .78rem; color: var(--text-muted); text-align: center; padding: 12px;
+    }
+
+    /* ---- board ---- */
+    /* Rows stretch to fill a dedicated monitor but are floored at min-content so
+       a crowded short window clips nothing. */
+    .board {
+      height: 100%; display: grid; gap: 1.6vmin;
+      grid-template-columns: repeat(auto-fit, minmax(clamp(130px, 20vmin, 260px), 1fr));
+      grid-auto-rows: minmax(min-content, 1fr);
+    }
+    .bt {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 1.4vmin 1.8vmin; min-width: 0;
+      display: flex; flex-direction: column; justify-content: center; gap: .4vmin;
+    }
+    .bt-sym {
+      font-family: var(--mono); font-weight: 700; letter-spacing: .04em;
+      font-size: clamp(.72rem, 2.1vmin, 1.1rem); color: var(--text-sec);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bt-price {
+      font-family: var(--mono); font-weight: 700; line-height: 1.05;
+      font-size: clamp(1.15rem, 5.2vmin, 3rem);
+      font-variant-numeric: tabular-nums;
+    }
+    .bt-delta { font-size: clamp(.6rem, 1.9vmin, .95rem); align-self: flex-start; }
+    .bt.up   { border-color: rgba(34,197,94,.28); }
+    .bt.down { border-color: rgba(239,68,68,.28); }
+
+    /* ---- ticker tape ---- */
+    .tape { height: 100%; display: flex; align-items: center; overflow: hidden; position: relative; }
+    .tape-run { display: flex; align-items: center; flex-shrink: 0; animation: tape-roll var(--dur, 60s) linear infinite; }
+    .tape:hover .tape-run { animation-play-state: paused; }
+    @keyframes tape-roll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+    .tk {
+      display: flex; align-items: baseline; gap: .9vmin; padding: 0 1.6vmin;
+      border-right: 1px solid var(--border); white-space: nowrap;
+    }
+    .tk-sym   { font-family: var(--mono); font-weight: 700; font-size: clamp(.85rem, 3.4vmin, 2rem); color: var(--accent); }
+    .tk-price { font-family: var(--mono); font-weight: 700; font-size: clamp(.85rem, 3.4vmin, 2rem); font-variant-numeric: tabular-nums; }
+    .tk-pct   { font-family: var(--mono); font-weight: 600; font-size: clamp(.68rem, 2.4vmin, 1.3rem); }
+    .tk-pct.up { color: var(--ok); } .tk-pct.down { color: var(--err); } .tk-pct.flat { color: var(--text-muted); }
+    @media (prefers-reduced-motion: reduce) {
+      .tape-run { animation: none; }
+      .tape { overflow-x: auto; }
+      .tape-run.dupe { display: none; }
+    }
+
+    /* ---- portfolio ---- */
+    .pf { height: 100%; display: flex; flex-direction: column; gap: 1.6vmin; min-height: 0; }
+    .pf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(clamp(110px, 18vmin, 200px), 1fr)); gap: 1.2vmin; }
+    .pf-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1.2vmin 1.6vmin; min-width: 0; }
+    .pf-lbl { font-family: var(--mono); font-size: clamp(.52rem, 1.5vmin, .72rem); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
+    .pf-val { font-family: var(--mono); font-weight: 700; font-size: clamp(1rem, 4.2vmin, 2.4rem); font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .pf-val.up { color: var(--ok); } .pf-val.down { color: var(--err); }
+    .pf-rows { flex: 1; min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); }
+    .pf-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 1.4vmin; padding: .9vmin 1.6vmin; }
+    .pf-row + .pf-row { border-top: 1px solid var(--border); }
+    .pf-row span { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: clamp(.66rem, 2vmin, 1.05rem); }
+    .pf-row .pf-sym { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pf-row .pf-day.up { color: var(--ok); } .pf-row .pf-day.down { color: var(--err); }
+
+    /* ---- strip ----
+       One line, always. The shell turns horizontal so the chrome shares the row
+       instead of stealing a second one, and the tape clips under a fade. */
+    body.po.panel-strip .po-shell { flex-direction: row; align-items: center; }
+    body.po.panel-strip .po-body { padding: 0 0 0 10px; }
+    body.po.panel-strip .po-bar { border-top: none; border-left: 1px solid var(--border); background: transparent; }
+    body.po.panel-strip .po-title, body.po.panel-strip .po-hint { display: none; }
+    /* One line means the alert cannot have a line of its own — for the duration
+       it shows, the alert IS the line. */
+    body.po.panel-strip .po-alert:not([hidden]) { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; }
+    .strip {
+      display: flex; align-items: baseline; gap: 0; height: 100%; overflow: hidden; white-space: nowrap;
+      mask-image: linear-gradient(90deg, #000 92%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent);
+    }
+    .sp { display: flex; align-items: baseline; gap: 6px; padding: 0 10px; border-right: 1px solid var(--border); }
+    .sp-sym   { font-family: var(--mono); font-weight: 700; font-size: clamp(.66rem, 3vmin, 1rem); color: var(--text-sec); }
+    .sp-price { font-family: var(--mono); font-weight: 700; font-size: clamp(.66rem, 3vmin, 1rem); font-variant-numeric: tabular-nums; }
+    .sp-pct   { font-family: var(--mono); font-size: clamp(.58rem, 2.4vmin, .88rem); }
+    .sp-pct.up { color: var(--ok); } .sp-pct.down { color: var(--err); } .sp-pct.flat { color: var(--text-muted); }
+  </style>
+</head>
+<body class="po">
+  <div class="po-shell">
+    <div class="po-alert" id="poAlert" hidden></div>
+    <main class="po-body" id="poBody">
+      <div class="po-empty">Waiting for the main window…</div>
+    </main>
+    <footer class="po-bar">
+      <span class="po-title" id="poTitle">Panel</span>
+      <span class="chip" id="poSession">—</span>
+      <span class="chip" id="poStale" hidden></span>
+      <span class="chip warn" id="poPlace" hidden>Placement ignored</span>
+      <span class="po-spacer"></span>
+      <span class="po-hint" id="poHint">F fullscreen · Esc close</span>
+    </footer>
+  </div>
+
+  <script type="module" src="js/popout.js"></script>
+</body>
+</html>

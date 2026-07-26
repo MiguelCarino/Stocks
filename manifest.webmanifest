@@ -1,0 +1,21 @@
+{
+  "name": "Carino Stocks",
+  "short_name": "Stocks",
+  "description": "Client-side markets watchlist, portfolio and alerts. Your keys, your device. Monitoring and visualization only — never trading, never advice.",
+  "id": "/",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "categories": ["finance", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "logo.webp",
+      "sizes": "50x50",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}

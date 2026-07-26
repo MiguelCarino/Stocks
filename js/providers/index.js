@@ -4,10 +4,21 @@
    serve the class and falling back by preference otherwise. Quotes are GROUPED
    by resolved provider, so each provider gets ONE batched call for all of its
    symbols. Profiles/series are cached through the store to conserve free-tier
-   budget. Adding a provider is a new module behind base.js — never a UI change. */
+   budget. Adding a provider is a new module behind base.js — never a UI change.
 
-import { get } from './base.js';
+   marketStatus() was inverted here. It used to be the answer, fetched fresh from
+   the provider on every render — an unbudgeted HTTP request every fifteen
+   seconds to learn a fact that changes four times a day and is fully derivable
+   from a clock. The local calendar in session.js is now the answer, and the
+   provider is a corroborator polled at most once every fifteen minutes. That
+   demotion is not just a saving: the two things it can still tell us are an
+   unscheduled halt and a holiday the local table does not know about, and both
+   only show up as a DISAGREEMENT. So the disagreement is reported rather than
+   resolved — silently preferring either side would discard the signal. */
+
+import { get, budget } from './base.js';
 import { classify } from './assetclass.js';
+import { sessionAt } from '../session.js';
 import './demo.js';
 import { setFinnhubKey } from './finnhub.js';
 import './finnhub.js';
@@ -23,6 +34,7 @@ import './alphavantage.js';
 import { store } from '../store.js';
 
 const SERIES_TTL = 10 * 60 * 1000;
+const STATUS_TTL = 15 * 60 * 1000;
 
 // Per-class provider preference, best first. Only AVAILABLE (key present or
 // keyless) providers that declare support for the class are eligible.
@@ -52,6 +64,68 @@ function available(id) {
   }
 }
 function supports(id, cls) { const p = get(id); return !!(p && p.classes && p.classes.includes(cls)); }
+
+/* ---- Market status: local truth, provider corroboration -------------------- */
+
+// One cached provider report, keyed by the provider that produced it so a
+// settings change invalidates it instead of attributing a stale answer.
+let statusCache = null;     // { id, at, report: {...}|null }
+let statusInflight = null;
+
+function refreshStatus(id) {
+  const fresh = statusCache && statusCache.id === id && (Date.now() - statusCache.at) < STATUS_TTL;
+  if (fresh || statusInflight) return;
+  const p = get(id);
+  if (!p || typeof p.marketStatus !== 'function') { statusCache = { id, at: Date.now(), report: null }; return; }
+  // Deliberately not awaited by the caller: marketStatus() sits on the render
+  // path, and blocking a repaint on a provider round-trip is what made this a
+  // per-tick request in the first place. The first call after a cold start
+  // therefore returns local-only; the corroboration lands on a later render.
+  statusInflight = Promise.resolve()
+    .then(() => p.marketStatus())
+    .catch(() => null)
+    .then((report) => { statusCache = { id, at: Date.now(), report: report || null }; })
+    .finally(() => { statusInflight = null; });
+}
+
+// Provider vocabulary is already normalized to 'pre'|'open'|'post'|'closed' by
+// each adapter; this only has to reconcile it with the local session states.
+function reconcile(local, provider) {
+  let conflict = null, disagreement = null;
+  if (provider) {
+    const name = provider.label || provider.id;
+    // A holiday name is only news on a day the local calendar expected trading.
+    // On a Saturday it is agreement stated twice. An early close is the same
+    // agreement in a different shape: the local calendar does list the day, it
+    // simply reports it as a shortened session rather than a closure, and the
+    // state on such a day is never 'holiday' — it walks open -> post -> closed.
+    if (provider.holiday && !local.earlyClose && local.state !== 'holiday' && local.state !== 'weekend') {
+      conflict = 'holiday-drift';
+      disagreement = `${name} reports a market holiday (${provider.holiday}) that the local calendar does not list.`;
+    } else if (provider.isOpen && !local.isOpen) {
+      conflict = 'provider-open';
+      disagreement = `${name} reports the market open; the local calendar says ${local.label.toLowerCase()}.`;
+    } else if (!provider.isOpen && local.isOpen) {
+      // The interesting direction: an unscheduled halt, or a closure the
+      // holiday table has never heard of.
+      conflict = 'provider-closed';
+      disagreement = `${name} reports the market closed during scheduled regular hours — possible halt or unlisted closure.`;
+    } else if (provider.session && provider.session !== local.state && local.isTradeable) {
+      conflict = 'session-drift';
+      disagreement = `${name} reports the ${provider.session} session; the local calendar says ${local.state}.`;
+    }
+  }
+  return {
+    // Local truth. app.js and the popouts read these directly.
+    isOpen: local.isOpen, session: local.state, label: local.label, detail: local.detail,
+    approx: local.approx, nextChange: local.nextChange, nextLabel: local.nextLabel, tz: local.tz,
+    local,
+    provider,                                     // null until a corroborator answers
+    agrees: provider ? conflict === null : null,  // null means "nobody asked" — not "agrees"
+    conflict, disagreement,
+    checkedAt: provider ? provider.at : null,
+  };
+}
 
 export const market = {
   // Push the current keys into each adapter module. Cheap; called before routing.
@@ -152,11 +226,29 @@ export const market = {
     return results.slice(0, 14);
   },
 
+  // Async only for source compatibility with its callers — it resolves without
+  // touching the network. Everything it returns is either local or already
+  // cached; the refresh it may kick off lands on a later call.
   async marketStatus() {
-    // Equity-market status from whichever equity provider is active.
     const id = this._route('AAAA', PREF);
-    return get(id).marketStatus().catch(() => null);
+    refreshStatus(id);
+    const local = sessionAt(Date.now(), 'US_EQUITY');
+    const snap = (statusCache && statusCache.id === id) ? statusCache : null;
+    const p = get(id);
+    const provider = snap && snap.report
+      ? { id, label: (p && p.label) || id, isOpen: !!snap.report.isOpen, session: snap.report.session || null,
+          holiday: snap.report.holiday || null, at: snap.at }
+      : null;
+    return reconcile(local, provider);
   },
+
+  // For a "check now" control: drops the TTL so the next marketStatus() picks
+  // up a fresh corroboration. Still costs exactly one request.
+  refreshMarketStatus() { statusCache = null; refreshStatus(this._route('AAAA', PREF)); },
 
   async validate(id) { this.syncKeys(); const p = get(id); return p && p.validate ? p.validate() : false; },
 };
+
+// Re-exported so the settings UI can read the call budget without reaching past
+// the facade into base.js.
+export { budget };

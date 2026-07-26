@@ -1,7 +1,11 @@
 /* providers/demo.js — keyless DEMO adapter. Serves bundled sample data from
    data/demo.json and applies a tiny random walk on every quote so prices tick
    and sparklines breathe with no API key. Purely illustrative — clearly badged
-   DEMO in the UI. */
+   DEMO in the UI.
+
+   The bundled file is same-origin and costs no quota, so it is fetched directly
+   rather than through getJSON: counting it would put a number in the call
+   budget that no free tier is charging for. */
 
 import { register, normQuote } from './base.js';
 
@@ -38,7 +42,14 @@ register({
       const t = d.tickers[sym];
       if (!t) continue;
       const st = tick(sym, { price: t.quote.price, series: t.series });
-      out[sym] = normQuote(sym, { ...t.quote, price: st.price }, 'demo');
+      out[sym] = normQuote(sym, {
+        ...t.quote, price: st.price,
+        baseline: 'prev_close',
+        baselineNote: 'Sample data — not a real close',
+        // The random walk runs whenever the page is open, including at 3am on a
+        // Sunday. It is not evidence that anything is trading.
+        session: null,
+      }, 'demo');
     }
     return out;
   },
@@ -64,5 +75,8 @@ register({
       .map((t) => ({ symbol: t.profile.symbol, description: t.profile.name }));
   },
 
-  async marketStatus() { return { isOpen: true, session: 'demo' }; },
+  // Sample data has no clock. The old { isOpen: true } was what made the market
+  // strip announce OPEN at 3am on a Sunday — a fabricated fact dressed as a
+  // provider report. The local calendar answers this now.
+  async marketStatus() { return null; },
 });

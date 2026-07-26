@@ -32,6 +32,40 @@ a{color:var(--accent);}
   color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:3px 6px;white-space:nowrap;}
 .live-chip.live{color:var(--ok);border-color:rgba(34,197,94,.4);}
 
+/* ---- session chip ----
+   Five states plus two modifiers. The dot carries the state colour so the text
+   can stay legible, and `approx` is deliberately dashed: a border that looks
+   unfinished is the point — the holiday table cannot vouch for that date. */
+.sess-chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 9px;background:transparent;
+  border:1px solid var(--border);border-radius:5px;font-family:var(--mono);font-size:.62rem;letter-spacing:.04em;
+  color:var(--text-sec);white-space:nowrap;cursor:pointer;transition:.15s;}
+.sess-chip:hover{border-color:var(--border-hi);background:var(--accent-faint);}
+.sc-dot{width:7px;height:7px;border-radius:50%;background:var(--text-muted);flex-shrink:0;}
+.sess-chip[data-state="open"]{color:var(--ok);border-color:rgba(34,197,94,.4);}
+.sess-chip[data-state="open"] .sc-dot{background:var(--ok);box-shadow:0 0 6px rgba(34,197,94,.6);}
+.sess-chip[data-state="pre"],.sess-chip[data-state="post"]{color:var(--accent);border-color:var(--accent-dim);}
+.sess-chip[data-state="pre"] .sc-dot,.sess-chip[data-state="post"] .sc-dot{background:var(--accent);}
+.sess-chip[data-state="holiday"]{color:var(--accent-hi);border-color:var(--accent-dim);}
+.sess-chip[data-state="holiday"] .sc-dot{background:var(--accent-hi);}
+.sess-chip.approx{border-style:dashed;}
+.sess-chip.conflict{border-color:var(--err);color:var(--err);}
+.sess-chip.conflict .sc-dot{background:var(--err);}
+.sess-line{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.sess-next{color:var(--text-sec);}
+.sess-detail{color:var(--text-muted);}
+.sess-approx{border:1px dashed var(--accent-dim);border-radius:4px;padding:2px 6px;color:var(--accent);}
+.sess-conflict{border:1px solid rgba(239,68,68,.45);border-radius:4px;padding:2px 6px;color:var(--err);}
+.sess-approx[hidden],.sess-conflict[hidden]{display:none;}
+
+/* ---- shared-link banner ---- */
+.hash-banner{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 20px;
+  background:var(--accent-faint);border-bottom:1px solid var(--accent-dim);}
+.hash-banner[hidden]{display:none;}
+.hb-text{font-size:.76rem;color:var(--text-sec);line-height:1.5;flex:1;min-width:240px;}
+.hb-text strong{color:var(--accent);}
+.hb-acts{display:flex;gap:8px;}
+.btn-primary.sm{height:30px;padding:0 12px;font-size:.74rem;}
+
 /* ---- market strip ---- */
 .market-strip{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:16px;
   flex-wrap:wrap;padding:8px 20px;background:linear-gradient(180deg,var(--bg-elev),var(--bg));border-bottom:1px solid var(--border);}
@@ -100,6 +134,26 @@ select.input{-webkit-appearance:none;appearance:none;}
 .delta.down{color:var(--err);background:rgba(239,68,68,.1);}
 .delta.flat{color:var(--text-muted);background:var(--border);}
 
+/* ---- tags: baseline, session, staleness ----
+   One small component for every "the number needs a caveat" case, so a stale
+   quote and a closed market never read as the same thing. */
+.card-tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 6px;min-height:16px;}
+.tag{font-family:var(--mono);font-size:.55rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--border);border-radius:4px;padding:2px 5px;color:var(--text-muted);white-space:nowrap;}
+.tag.basis{border-color:transparent;padding-left:0;text-transform:none;letter-spacing:.02em;}
+/* "no baseline" is an absence, not a warning: dimmer than a stated basis, and
+   deliberately not coloured like an error the user could act on. */
+.tag.basis.unstated{color:var(--text-muted);opacity:.8;font-style:italic;}
+.tag.always{color:var(--accent);border-color:var(--accent-dim);}
+.tag.closed{color:var(--text-sec);border-color:var(--border-hi);}
+.tag.live{color:var(--ok);border-color:rgba(34,197,94,.4);}
+.tag.stale{color:var(--err);border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.08);}
+.tag.approx{color:var(--accent);border-style:dashed;border-color:var(--accent-dim);}
+.tag.sess{color:var(--text-sec);}
+.tag.scope.regular{color:var(--text-sec);}
+.tag.scope.extended{color:var(--accent);border-color:var(--accent-dim);}
+.tag.scope.any{color:var(--text-muted);}
+
 /* sparkline (new branding component) */
 .card-spark{margin:6px 0;height:40px;}
 .spark{width:100%;height:40px;display:block;}
@@ -158,6 +212,8 @@ table.data tr:hover td{background:var(--accent-faint);}
 .range-tab{background:transparent;border:none;color:var(--text-sec);font-family:var(--mono);font-size:.7rem;padding:6px 14px;cursor:pointer;}
 .range-tab+.range-tab{border-left:1px solid var(--border);}
 .range-tab.active{background:var(--accent-faint);color:var(--accent);}
+.drawer-session{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.ds-note{font-family:var(--mono);font-size:.62rem;color:var(--text-muted);}
 .chart-wrap{height:220px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);padding:6px;}
 .detail-chart{width:100%;height:100%;display:block;}
 
@@ -176,8 +232,25 @@ table.data tr:hover td{background:var(--accent-faint);}
 .field-row{display:flex;gap:10px;} .field-row .field{flex:1;}
 .field-note{font-size:.68rem;color:var(--text-muted);line-height:1.5;}
 .toggles{display:flex;flex-direction:column;gap:8px;}
-.chk{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text-sec);cursor:pointer;}
+.chk{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text-sec);cursor:pointer;line-height:1.45;}
+.chk input{flex-shrink:0;}
 .key-status{font-family:var(--mono);font-size:.68rem;color:var(--text-sec);min-height:1em;}
+.warn-note{color:var(--err);}
+
+/* ---- settings section (detached displays) ---- */
+.settings-section{border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:10px;}
+.section-title{font-family:var(--display);font-weight:800;font-size:.92rem;}
+.cap-list{display:flex;flex-direction:column;gap:6px;border:1px solid var(--border);border-radius:6px;padding:10px 12px;background:var(--bg);}
+.cap-row{display:grid;grid-template-columns:9px 150px 1fr;align-items:baseline;gap:8px;font-size:.7rem;color:var(--text-sec);line-height:1.45;}
+.cap-dot{width:7px;height:7px;border-radius:50%;background:var(--text-muted);transform:translateY(-1px);}
+.cap-dot.ok{background:var(--ok);} .cap-dot.warn{background:var(--accent);} .cap-dot.off{background:var(--text-muted);}
+.cap-k{font-family:var(--mono);font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);}
+.picker-row{display:flex;gap:10px;align-items:flex-end;} .picker-row .field{flex:1;}
+.disp-acts{display:flex;gap:8px;flex-wrap:wrap;}
+.disp-open{display:flex;flex-direction:column;gap:6px;}
+.disp-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:.74rem;}
+.dr-name{font-family:var(--mono);font-weight:700;font-size:.76rem;}
+.dr-where{font-family:var(--mono);font-size:.62rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* rule editor (new branding component) */
 .rule-add{display:grid;grid-template-columns:1.2fr .9fr .7fr 1fr auto;gap:6px;}
@@ -187,9 +260,13 @@ table.data tr:hover td{background:var(--accent-faint);}
 .switch{width:34px;height:18px;border-radius:9px;background:var(--border);border:none;position:relative;cursor:pointer;flex-shrink:0;transition:.15s;}
 .switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--text-muted);transition:.15s;}
 .switch.on{background:var(--accent);} .switch.on::after{left:18px;background:#050505;}
-.alert-log{margin-top:12px;display:flex;flex-direction:column;gap:4px;}
-.log-row{display:flex;gap:10px;font-family:var(--mono);font-size:.66rem;color:var(--text-sec);}
+.log-head{display:flex;align-items:center;gap:8px;margin-top:12px;}
+.log-head .rail-lbl{flex:1;}
+.alert-log{display:flex;flex-direction:column;gap:5px;}
+.log-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.66rem;color:var(--text-sec);}
 .log-time{color:var(--text-muted);flex-shrink:0;}
+.log-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.log-snap{color:var(--text);flex-shrink:0;}
 
 /* ---- toasts ---- */
 .toast-rack{position:fixed;top:70px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:340px;}
@@ -215,9 +292,13 @@ body.privacy-on .amount{filter:blur(6px);transition:filter .1s;}
 body.privacy-on .amount:hover{filter:none;}
 
 /* ---- progress (quota) ---- */
+.quota{display:flex;flex-direction:column;}
+.quota[hidden]{display:none;}
 .progress{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin:5px 0;}
-.progress-bar{height:100%;background:var(--accent);width:0;}
+.progress-bar{height:100%;background:var(--accent);width:0;transition:width .3s;}
+.progress-bar.hot{background:var(--err);}
 .quota-txt{font-family:var(--mono);font-size:.58rem;color:var(--text-muted);}
+.quota-sub{opacity:.75;}
 
 /* ---- responsive ---- */
 @media(max-width:900px){
@@ -228,4 +309,7 @@ body.privacy-on .amount:hover{filter:none;}
 @media(max-width:560px){
   .drawer{width:100vw;} .card-price{font-size:1.3rem;}
   .rule-add{grid-template-columns:1fr 1fr;}
+  .cap-row{grid-template-columns:9px 1fr;} .cap-row .cap-v{grid-column:2;}
+  .picker-row{flex-direction:column;align-items:stretch;}
+  .hash-banner{padding:10px 14px;}
 }

@@ -6,6 +6,10 @@
   <link rel="icon" href="logo.webp" />
   <title>Stocks — Carino Systems</title>
   <meta name="description" content="Client-side markets watchlist, portfolio and alerts. Your keys, your device. Monitoring only, never advice." />
+  <meta name="theme-color" content="#050505" />
+  <!-- Manifest only, deliberately no service worker: a hand-maintained precache
+       list on a no-build static host strands users on a stale bundle. -->
+  <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="fonts/carino-fonts.css" />
   <link rel="stylesheet" href="css/stocks.css" />
 </head>
@@ -14,6 +18,9 @@
   <header class="cs-header" data-carino-strip>
     <div class="cs-right" data-carino-actions>
       <span class="live-chip" id="modeChip" title="Data source">DEMO</span>
+      <button class="sess-chip" id="sessChip" data-state="closed" title="Market session (this device's clock)">
+        <span class="sc-dot"></span><span class="sc-txt" id="sessChipTxt">—</span>
+      </button>
       <button class="cs-btn" id="btnPause" title="Pause / resume auto-refresh">⏸</button>
       <select class="cs-btn cs-select" id="intervalSel" title="Refresh interval">
         <option value="5">5s</option><option value="15" selected>15s</option>
@@ -26,15 +33,33 @@
       </div>
       <button class="cs-btn" id="btnPrivacy" title="Blur amounts">👁</button>
       <button class="cs-btn" id="btnAlerts" title="Alert rules">🔔</button>
+      <button class="cs-btn" id="btnDisplays" title="Detached displays">⧉</button>
       <button class="cs-btn" id="btnSettings" title="Settings">⚙</button>
     </div>
   </header>
+
+  <!-- Shared-link banner: only shown while the watchlist came from the URL hash -->
+  <div class="hash-banner" id="hashBanner" hidden>
+    <div class="hb-text">
+      <strong>Shared view.</strong> This watchlist came from the link you opened. It is not saved in this browser,
+      and your own watchlist is untouched.
+    </div>
+    <div class="hb-acts">
+      <button class="btn-primary sm" id="hashAdopt">Save to my browser</button>
+      <button class="cs-btn" id="hashDiscard">Discard</button>
+    </div>
+  </div>
 
   <!-- Market status strip -->
   <div class="market-strip" id="marketStrip" hidden>
     <div class="mkt-tiles" id="mktTiles"></div>
     <div class="mkt-meta">
-      <span class="live-chip" id="mktState">—</span>
+      <span class="sess-line" id="sessLine">
+        <span class="sess-next" id="sessNext"></span>
+        <span class="sess-detail" id="sessDetail"></span>
+        <span class="sess-approx" id="sessApprox" hidden></span>
+        <span class="sess-conflict" id="sessConflict" hidden></span>
+      </span>
       <span class="mkt-updated" id="mktUpdated"></span>
       <span class="mkt-note">Delayed · not investment advice</span>
     </div>
@@ -61,6 +86,7 @@
           <span class="rail-lbl">API credits</span>
           <div class="progress"><div class="progress-bar" id="quotaBar"></div></div>
           <span class="quota-txt" id="quotaTxt"></span>
+          <span class="quota-txt quota-sub" id="quotaSub"></span>
         </div>
         <p class="disclaimer-mini" id="railDisclaimer"></p>
       </div>
@@ -82,6 +108,9 @@
 
       <section id="portView" hidden>
         <div class="stat-row" id="portStats"></div>
+        <!-- Only shown when holdings span more than one currency: the totals are
+             a plain sum and must say so rather than pick a symbol. -->
+        <p class="field-note warn-note" id="portCurNote" hidden></p>
         <div class="table-wrap">
           <table class="data" id="portTable">
             <thead><tr>
@@ -127,7 +156,9 @@
           <label class="field"><span>Refresh (s)</span>
             <input type="number" class="input" id="setInterval" min="5" max="600" /></label>
         </div>
-        <label class="chk"><input type="checkbox" id="setUniversal" /> Use this provider for <strong>all</strong> symbols (universal). Off = auto-route each symbol by asset class.</label>
+        <!-- The caption is one element: a flex row would otherwise split the text
+             into separate items either side of the <strong> and misalign it. -->
+        <label class="chk"><input type="checkbox" id="setUniversal" /><span>Use this provider for <strong>all</strong> symbols (universal). Off = auto-route each symbol by asset class.</span></label>
 
         <!-- Per-provider key config; only the selected provider's block is shown. -->
         <div class="provider-config" data-provider="finnhub">
@@ -170,6 +201,41 @@
           <a href="https://finnhub.io/register" target="_blank" rel="noopener">Get a Finnhub key ↗</a> ·
           <a href="https://twelvedata.com/pricing" target="_blank" rel="noopener">Get a Twelve Data key ↗</a>
         </div>
+
+        <!-- Detached displays: popout windows + Picture-in-Picture -->
+        <section class="settings-section" id="displaysSection">
+          <h3 class="section-title">Detached displays</h3>
+          <p class="field-note">Put a panel in its own window or a Picture-in-Picture tile — a second monitor, a TV,
+            or a strip docked over other apps. Panels receive prices from this window and never fetch on their own,
+            so an extra panel costs no API credits.</p>
+          <div class="cap-list" id="dispCaps"></div>
+          <div class="field-row">
+            <label class="field"><span>Panel</span><select class="input" id="dispPanel"></select></label>
+            <label class="field"><span>Mode</span>
+              <select class="input" id="dispMode">
+                <option value="auto">Auto</option>
+                <option value="window">Window</option>
+                <option value="pip">Picture-in-Picture</option>
+              </select></label>
+          </div>
+          <p class="field-note" id="dispPanelDesc"></p>
+          <div class="picker-row">
+            <label class="field"><span>Monitor</span>
+              <select class="input" id="dispScreen"><option value="">This monitor</option></select></label>
+            <button class="cs-btn" id="dispDetect">Detect monitors</button>
+          </div>
+          <div class="disp-acts">
+            <button class="btn-primary" id="dispOpen">Open panel</button>
+            <button class="cs-btn" id="dispReplace">Re-place windows</button>
+            <button class="cs-btn" id="dispCloseAll">Close all</button>
+          </div>
+          <div class="disp-open" id="dispOpenList"></div>
+          <p class="field-note warn-note" id="dispPlaceNote" hidden></p>
+          <p class="field-note">Panels open one at a time: a browser grants only the first new window per click, so
+            there is no one-click restore of a saved layout.</p>
+        </section>
+
+        <p class="field-note" id="storageNote"></p>
       </div>
       <div class="modal-foot">
         <button class="cs-btn danger" id="btnClearData">Clear all data</button>
@@ -200,7 +266,19 @@
           <input type="number" class="input" id="ruleVal" placeholder="value" step="any" />
           <button class="btn-primary" id="ruleAdd">Add</button>
         </div>
+        <label class="field"><span>Session scope</span>
+          <select class="input" id="ruleSess">
+            <option value="regular">Regular hours only</option>
+            <option value="extended">Include extended hours</option>
+            <option value="any">Any session</option>
+          </select></label>
+        <p class="field-note" id="ruleSessNote"></p>
         <div class="rule-list" id="ruleList"></div>
+        <div class="log-head">
+          <span class="rail-lbl">Recently triggered</span>
+          <select class="cs-select sm" id="logFilter" title="Filter by symbol"><option value="">All symbols</option></select>
+          <button class="cs-btn" id="btnLogCsv" title="Download the alert log as CSV">CSV</button>
+        </div>
         <div class="alert-log" id="alertLog"></div>
       </div>
     </div>
