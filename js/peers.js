@@ -53,6 +53,7 @@ let seq = 0;
 let census = null;
 let frame = null;              // last 'quotes' payload seen, whoever produced it
 let frameWrittenAt = 0;
+let wakeCb = null;             // called on the leader when a visible peer reports in
 let frameWriteTimer = null;
 
 function makeId() {
@@ -112,6 +113,15 @@ function onMessage(ev) {
   // in the background also knows its timers are clamped, which is the honest
   // explanation for a frame that arrives a minute late instead of every 15s.
   emit(msg.type, msg.payload, { from: msg.id, seq: msg.seq, ts: msg.ts, role: msg.role, vis: msg.vis, type: msg.type });
+
+  // A hidden leader has its timers clamped to roughly once a minute, which is
+  // exactly the case where a popout on another monitor is the only thing being
+  // read. Message DELIVERY is not clamped, so the visible window's census —
+  // running at full rate because it is on screen — becomes the leader's clock.
+  // The leader still decides whether it is actually due; this only wakes it.
+  if (leader && msg.vis === 'visible' && wakeCb) {
+    try { wakeCb(); } catch (e) { /* a bad subscriber must not break the mesh */ }
+  }
 }
 
 /* The frame cache exists so a cold popout paints prices instead of dashes before
@@ -263,6 +273,10 @@ function openChannel() {
 
 export const peers = {
   id: winId,
+
+  // Register the leader's "you may be due" callback. Only ever fired on the
+  // window holding the lock, and only in response to a peer that is on screen.
+  onWake(fn) { wakeCb = typeof fn === 'function' ? fn : null; },
   // True when this window cannot coordinate at all and is deliberately acting as
   // if it were the only one open: leadership is assumed, alerts may double-fire
   // across tabs exactly as they did before. Honest, not silent.

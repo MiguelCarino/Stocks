@@ -83,6 +83,14 @@ export function createScheduler(tickFn, opts = {}) {
     start() { run(); },
     stop() { clearTimeout(timer); timer = null; nextAt = 0; },
     now() { run(); },
+
+    // Externally-driven catch-up, for when this window's own timer cannot be
+    // trusted. A backgrounded leader is clamped to roughly one wake-up a minute,
+    // so `nextAt` slides past unnoticed while a popout on another monitor shows
+    // an ageing frame. A visible peer calls this on its own un-clamped cadence;
+    // the scheduled time is still the authority, so an early nudge is a no-op
+    // and no amount of nudging can poll faster than the governor allows.
+    wake() { if (!paused && !running && nextAt && Date.now() >= nextAt) run(); },
     setPaused(p) { paused = !!p; if (!paused) run(); else schedule(); },
     isPaused() { return paused; },
     isGated() { return !gate; },

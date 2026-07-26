@@ -150,6 +150,10 @@ async function startEngine() {
     isLeader: () => shouldFetch(),
     anyVisible: () => peers.anyVisible(),
   });
+  // Let the visible windows drive this one's cadence when its own timers are
+  // clamped for being in the background. wake() honours the governor, so this
+  // can only ever recover a missed tick, never add one.
+  peers.onWake(() => scheduler && scheduler.wake());
   scheduler.start();
 }
 
