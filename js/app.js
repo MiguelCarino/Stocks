@@ -348,11 +348,11 @@ function setPrivacy(on) {
 }
 
 /* ---- autocomplete --------------------------------------------------------- */
-let acTimer = null;
 // Wire an input + result box into a keyboard-navigable autocomplete:
 // type to search, ↑/↓ to highlight, Enter to commit the highlight or the typed
 // symbol, Esc to dismiss; clicking a row still works.
 function wireAutocomplete(input, box, onPick) {
+  let acTimer = null;
   box.setAttribute('role', 'listbox');
   input.setAttribute('role', 'combobox');
   input.setAttribute('aria-autocomplete', 'list');
@@ -370,7 +370,6 @@ function wireAutocomplete(input, box, onPick) {
     acTimer = setTimeout(async () => {
       const results = await market.search(q).catch(() => []);
       box.textContent = ''; box._hi = -1;
-      box.hidden = results.length === 0;
       for (const r of results.slice(0, 10)) {
         const row = el('div', 'ac-row'); row.setAttribute('role', 'option');
         row.dataset.sym = normalizeSymbol(r.symbol);
@@ -379,6 +378,18 @@ function wireAutocomplete(input, box, onPick) {
         row.addEventListener('click', () => onPick(row.dataset.sym));
         box.appendChild(row);
       }
+      // Always offer to add exactly what was typed, so committing never depends
+      // on a search match (demo mode only knows the bundled tickers).
+      const typed = normalizeSymbol(q);
+      if (typed && ![...box.querySelectorAll('.ac-row')].some((r) => r.dataset.sym === typed)) {
+        const row = el('div', 'ac-row'); row.setAttribute('role', 'option');
+        row.dataset.sym = typed;
+        row.append(el('span', 'ac-sym', typed));
+        row.append(el('span', 'ac-desc', 'Add symbol'));
+        row.addEventListener('click', () => onPick(row.dataset.sym));
+        box.appendChild(row);
+      }
+      box.hidden = box.children.length === 0;
     }, 220);
   });
 
