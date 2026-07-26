@@ -267,6 +267,10 @@ async function tick() {
     return;
   }
   noteFreshness(quotes);
+  // A symbol the fetch asked for and did not get back is not "loading" — the
+  // routed provider does not cover it. Without this the card sits on an em dash
+  // forever and reads as a stuck feed rather than an answer.
+  state.uncovered = new Set(all.filter((s) => !quotes[s] && !state.quotes[s]));
   state.quotes = { ...state.quotes, ...quotes };
   state.lastUpdated = Date.now();
 
@@ -447,7 +451,7 @@ function renderCards() {
     head.append(idBox, btns);
 
     const priceRow = el('div', 'card-price-row');
-    priceRow.append(el('span', 'card-price amount', q ? fmtPrice(q.price, q.currency) : '—'));
+    priceRow.append(el('span', 'card-price amount', q ? fmtPrice(q.price, q.currency, sym) : '—'));
     priceRow.append(deltaChip(q));
 
     const tags = el('div', 'card-tags');
@@ -494,6 +498,12 @@ function fillTags(box, sym) {
     }
   }
 
+  if (!q && state.uncovered && state.uncovered.has(sym)) {
+    parts.push(['uncovered', 'Not covered',
+      'The provider handling this symbol returned no quote for it. Try another provider in Settings, '
+      + 'or check the symbol.']);
+  }
+
   if (mkt === 'CRYPTO') parts.push(['always', '24/7', 'Crypto trades continuously; it is never closed.']);
   else if (s.state !== 'open') parts.push(['closed', s.label, [s.detail, s.nextLabel].filter(Boolean).join(' · ')]);
 
@@ -519,7 +529,9 @@ function deltaChip(q) {
   if (!q || q.changePct == null) { c.classList.add('flat'); c.textContent = '—'; return c; }
   const up = q.changePct >= 0;
   c.classList.add(up ? 'up' : 'down');
-  c.textContent = `${up ? '▲' : '▼'} ${fmtNum(q.change)} (${fmtNum(q.changePct)}%)`;
+  // The change shares the price's precision. Two decimals turned every move on a
+  // sub-dollar coin or an FX pair into "0.00" next to a non-zero percentage.
+  c.textContent = `${up ? '▲' : '▼'} ${fmtMove(q.change, q.price)} (${fmtNum(q.changePct)}%)`;
   return c;
 }
 
@@ -553,7 +565,7 @@ function renderRail() {
     const q = state.quotes[sym];
     const row = el('div', 'rail-row'); row.dataset.sym = sym;
     row.append(el('span', 'rr-sym', sym));
-    row.append(el('span', 'rr-price amount', q ? fmtPrice(q.price, q.currency) : '—'));
+    row.append(el('span', 'rr-price amount', q ? fmtPrice(q.price, q.currency, sym) : '—'));
     row.appendChild(deltaChip(q));
     row.addEventListener('click', () => openDrawer(sym));
     list.appendChild(row);
@@ -625,7 +637,7 @@ async function renderDrawer() {
     if (tip) d.title = tip;
     kv.append(d);
   };
-  pair('Last', q ? fmtPrice(q.price, q.currency) : '—');
+  pair('Last', q ? fmtPrice(q.price, q.currency, sym) : '—');
   pair('Change', q && q.changePct != null ? `${fmtNum(q.change)} (${fmtNum(q.changePct)}%)` : '—');
   // The three-value vocabulary is too coarse for "an IEX close" versus "the
   // official one", so the provider's own sentence is the tooltip when it has one.
@@ -1492,10 +1504,35 @@ function refreshAll() {
 // does not, so the '$' is only for the currency that actually is dollars. A
 // portfolio total mixes currencies and is therefore printed without a symbol at
 // all rather than picking one of them to be wrong in.
-function fmtPrice(v, currency) {
+// Two decimals is right for equities and wrong for almost everything else: an FX
+// pair moves in the fourth, and a sub-dollar coin has nothing left at the second.
+// Precision follows the magnitude of the number, not the asset class, so it stays
+// correct for a symbol whose class we guessed wrong.
+function priceDecimals(v) {
+  const a = Math.abs(Number(v) || 0);
+  if (a >= 100) return 2;
+  if (a >= 1) return 4;
+  if (a >= 0.01) return 5;
+  return 8;
+}
+function fmtPrice(v, currency, symbol) {
   if (v == null) return '—';
-  const prefix = !currency || currency === 'USD' ? '$' : currency + ' ';
-  return prefix + fmtNum(v);
+  // An FX pair is a ratio, not an amount of anything — 'EURUSD $1.08' reads as a
+  // dollar price for a euro. Quote the counter currency instead.
+  const fx = symbol && isFxSymbol(symbol);
+  const prefix = fx ? '' : (!currency || currency === 'USD' ? '$' : currency + ' ');
+  const suffix = fx && currency ? ' ' + currency : '';
+  const d = priceDecimals(v);
+  return prefix + Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) + suffix;
+}
+function isFxSymbol(sym) {
+  try { return marketForSymbol(sym, state.quotes[sym]) === 'FX'; } catch (e) { return false; }
+}
+// Absolute move, rendered at the precision of the price it moved.
+function fmtMove(v, price) {
+  if (v == null) return '—';
+  const d = priceDecimals(price != null ? price : v);
+  return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 function fmtNum(v) { return v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtInt(v) { return v == null ? '—' : Number(v).toLocaleString('en-US'); }

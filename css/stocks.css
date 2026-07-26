@@ -149,6 +149,7 @@ select.input{-webkit-appearance:none;appearance:none;}
 .tag.live{color:var(--ok);border-color:rgba(34,197,94,.4);}
 .tag.stale{color:var(--err);border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.08);}
 .tag.approx{color:var(--accent);border-style:dashed;border-color:var(--accent-dim);}
+.tag.uncovered{color:var(--warn,#f59e0b);border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.08);}
 .tag.sess{color:var(--text-sec);}
 .tag.scope.regular{color:var(--text-sec);}
 .tag.scope.extended{color:var(--accent);border-color:var(--accent-dim);}

@@ -439,6 +439,10 @@ function empty(msg) {
   return d;
 }
 
+// The board is the watchlist on another monitor, so it renders the watchlist's
+// own card markup against the app's stylesheet rather than a second look-alike.
+// Cards keep their natural height here: stretching eight of them to fill a
+// 1080p screen is what made the panel read as mostly empty.
 function renderBoard() {
   const syms = symbolList();
   if (!syms.length) return null;
@@ -446,15 +450,38 @@ function renderBoard() {
   grid.className = 'board';
   for (const sym of syms) {
     const q = quoteFor(sym);
-    const dir = direction(q);
-    const tile = document.createElement('div');
-    tile.className = 'bt ' + dir;
-    tile.appendChild(node('div', 'bt-sym', sym));
-    tile.appendChild(node('div', 'bt-price amount', fmtPrice(q && q.price, q && q.currency)));
-    tile.appendChild(deltaChip(q, 'bt-delta'));
-    grid.appendChild(tile);
+    const prof = store.profiles[sym];
+    const card = node('article', 'card ' + direction(q));
+
+    const head = node('div', 'card-head');
+    const idBox = node('div', 'card-id');
+    idBox.appendChild(node('span', 'card-sym', sym));
+    if (prof && prof.name) idBox.appendChild(node('span', 'card-name', prof.name));
+    head.appendChild(idBox);
+
+    const priceRow = node('div', 'card-price-row');
+    priceRow.appendChild(node('span', 'card-price amount', fmtPrice(q && q.price, q && q.currency, sym)));
+    priceRow.appendChild(deltaChip(q));
+
+    const tags = node('div', 'card-tags');
+    fillCardTags(tags, sym, q);
+
+    card.append(head, priceRow, tags);
+    grid.appendChild(card);
   }
   return grid;
+}
+
+// Session and baseline only. The panel deliberately does not repeat the global
+// staleness chip on every card — the footer already says it once, for all of them.
+function fillCardTags(box, sym, q) {
+  const mkt = marketForSymbol(sym, q);
+  if (q && (q.baseline === 'rolling_24h' || mkt === 'CRYPTO')) box.appendChild(node('span', 'tag basis', 'vs 24h'));
+  else if (q && q.baseline === 'prev_close') box.appendChild(node('span', 'tag basis', 'vs prev close'));
+
+  if (mkt === 'CRYPTO') { box.appendChild(node('span', 'tag always', '24/7')); return; }
+  const s = sessionAt(Date.now(), mkt);
+  if (s.state !== 'open') box.appendChild(node('span', 'tag closed', s.label));
 }
 
 function renderTicker() {
@@ -480,7 +507,7 @@ function tickerRun(syms, dupe) {
     const item = document.createElement('div');
     item.className = 'tk';
     item.appendChild(node('span', 'tk-sym', sym));
-    item.appendChild(node('span', 'tk-price amount', fmtPrice(q && q.price, q && q.currency)));
+    item.appendChild(node('span', 'tk-price amount', fmtPrice(q && q.price, q && q.currency, sym)));
     item.appendChild(node('span', 'tk-pct ' + direction(q), fmtPct(q && q.changePct)));
     run.appendChild(item);
   }
@@ -497,7 +524,7 @@ function renderStrip() {
     const item = document.createElement('div');
     item.className = 'sp';
     item.appendChild(node('span', 'sp-sym', sym));
-    item.appendChild(node('span', 'sp-price amount', fmtPrice(q && q.price, q && q.currency)));
+    item.appendChild(node('span', 'sp-price amount', fmtPrice(q && q.price, q && q.currency, sym)));
     item.appendChild(node('span', 'sp-pct ' + direction(q), fmtPct(q && q.changePct)));
     row.appendChild(item);
   }
@@ -556,7 +583,7 @@ function deltaChip(q, extraClass) {
   // Crypto and FX quotes often carry a percent without an absolute move; show
   // the percent alone rather than a dash pretending to be a number.
   c.textContent = q.change == null ? `${arrow} ${fmtPct(q.changePct)}`
-    : `${arrow} ${fmtNum(q.change)} (${fmtPct(q.changePct)})`;
+    : `${arrow} ${fmtMove(q.change, q.price)} (${fmtPct(q.changePct)})`;
   return c;
 }
 
@@ -586,10 +613,29 @@ function num(v) {
 function fmtNum(v) {
   return v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function fmtPrice(v, currency) {
+// Mirrors the main window: two decimals suits equities and misrepresents an FX
+// pair, which moves in the fourth. A pair is a ratio, so it takes no $ prefix.
+// Absolute move, rendered at the precision of the price it moved.
+function fmtMove(v, price) {
   if (v == null) return '—';
-  const prefix = !currency || currency === 'USD' ? '$' : currency + ' ';
-  return prefix + fmtNum(v);
+  const d = priceDecimals(price != null ? price : v);
+  return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function priceDecimals(v) {
+  const a = Math.abs(Number(v) || 0);
+  if (a >= 100) return 2;
+  if (a >= 1) return 4;
+  if (a >= 0.01) return 5;
+  return 8;
+}
+function fmtPrice(v, currency, symbol) {
+  if (v == null) return '—';
+  let fx = false;
+  try { fx = !!symbol && marketForSymbol(symbol, quoteFor(symbol)) === 'FX'; } catch (e) { /* default to money */ }
+  const prefix = fx ? '' : (!currency || currency === 'USD' ? '$' : currency + ' ');
+  const suffix = fx && currency ? ' ' + currency : '';
+  const d = priceDecimals(v);
+  return prefix + Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) + suffix;
 }
 function signedPrice(v) {
   if (v == null) return '—';
