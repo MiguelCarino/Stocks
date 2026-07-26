@@ -9,42 +9,83 @@
    the age of the last frame is tracked independently of the frame itself and is
    allowed to visibly degrade the numbers. Opening this page cold — by URL, with
    no opener alive — paints the persisted frame and declares it stale in the same
-   breath, because nothing has proven a publisher exists. */
+   breath, because nothing has proven a publisher exists.
+
+   WHAT THIS FILE NO LONGER DOES: draw. It used to carry its own board, ticker,
+   portfolio and strip renderers, which were near-copies of the main window's and
+   drifted from them one honesty fix at a time — the panel was still printing
+   'EURUSD $1.08' months after the app stopped. Rendering now goes through
+   createWidget() from widgets.js, so a panel and a workspace tile of the same
+   kind are the same code and cannot disagree about what a quote means. What is
+   left here is everything a widget deliberately does not know: which panel this
+   window is, where it belongs on which monitor, how old the frame is, and
+   whether anyone is still publishing.
+
+   The four panel ids are frozen. A window opened by the previous version is
+   still running the previous version's code, and every config in stk_popouts
+   names board | ticker | portfolio | strip; those ids keep choosing this page's
+   layout, and they map onto widget kinds rather than being replaced by them. */
 
 import { peers } from './peers.js';
 import { store } from './store.js';
-import { portfolioTotals } from './engine.js';
-import { sessionAt, marketForSymbol, formatCountdown } from './session.js';
-// Only the two storage readers, and only because the host is the one that writes
-// that storage: a second, hand-rolled reader of the same key is how a panel ends
-// up silently ignoring every setting it was opened with. Nothing in displays.js
-// runs at import time — no window.open, no permission probe.
-import { panelConfig, screenGeometry } from './displays.js';
+import { sessionAt, marketForSymbol } from './session.js';
+// The storage readers, and only because the host is the one that writes that
+// storage: a second, hand-rolled reader of the same key is how a panel ends up
+// silently ignoring every setting it was opened with. panelWidget() is the same
+// argument applied to the substitution rule — displays.js decides which widget an
+// unknown kind falls back to and writes the sentence explaining it, and this file
+// prints that sentence rather than deciding again. Nothing in displays.js runs at
+// import time — no window.open, no permission probe.
+import { panelConfig, panelWidget, screenGeometry, PANELS } from './displays.js';
+import { createWidget, widgetMeta } from './widgets.js';
+import { fmtAge } from './format.js';
 
-// The panel kinds this page can render, kept local: what a receiver can draw is
-// its own business, and the host's PANELS table carries sizing and defaults that
-// mean nothing on this side.
-const KINDS = {
-  board: { label: 'Board', render: renderBoard },
-  ticker: { label: 'Ticker', render: renderTicker },
-  portfolio: { label: 'Portfolio', render: renderPortfolio },
-  strip: { label: 'Strip', render: renderStrip },
+// The mapping the displays contract fixes. The key is what the URL and every
+// stored config say; the value is what actually draws.
+const PANEL_WIDGET = {
+  board: 'cards',
+  ticker: 'quote',
+  portfolio: 'portfolio',
+  strip: 'tape',
 };
-const FALLBACK_KIND = 'board';
+const FALLBACK_PANEL = 'board';
 
 // Below ~20s even a 5s poll can miss a beat, so the floor keeps the badge from
 // flickering; above it, staleness tracks whatever cadence the leader publishes.
 const STALE_FLOOR_MS = 20000;
 const STALE_FACTOR = 2.5;
 
+/* Host state a frame does not carry. Series arrive one localStorage write at a
+   time rather than over the mesh, so a panel that read them once at open would
+   show a chart that never gains a point — which is exactly the kind of
+   live-looking dead surface this page exists to prevent. They are re-read when a
+   frame lands and when the host writes the key, and never written. */
+const SHARED = {
+  series: 'stk_series',
+  profiles: 'stk_profiles',
+  rules: 'stk_rules',
+  alertlog: 'stk_alertlog',
+  watchlist: 'stk_watchlist',
+  holdings: 'stk_holdings',
+};
+
+const shared = { series: {}, profiles: {}, rules: [], alertlog: [], watchlist: null, holdings: null };
+
 const el = {};
 const state = {
-  panelId: FALLBACK_KIND,
-  kind: FALLBACK_KIND,
+  panelId: FALLBACK_PANEL,
+  panelKind: FALLBACK_PANEL,   // board|ticker|portfolio|strip — chooses the layout
+  widgetKind: PANEL_WIDGET[FALLBACK_PANEL],
+  symbol: null,        // pinned by whoever opened the panel; survives clicks
+  widgetNote: null,    // displays.js's sentence when the widget asked for was substituted
+  selection: null,     // clicked in this window; what an unpinned widget follows
   cfg: {},
+  widget: null,
   frame: null,
   frameAt: 0,          // local clock; 0 while nothing live has arrived
   cold: true,          // no live broadcast seen yet in this window's lifetime
+  freshness: {},       // symbol -> { ts, changedAt, polls }, for frozen quotes
+  uncovered: new Set(),
   sessions: new Map(), // market id -> session object asserted by the leader
   watchlist: null,
   holdings: null,
@@ -57,16 +98,27 @@ const state = {
 boot();
 
 function boot() {
-  for (const id of ['poBody', 'poTitle', 'poSession', 'poStale', 'poPlace', 'poHint', 'poAlert']) {
+  for (const id of ['poBody', 'poTitle', 'poSession', 'poStale', 'poPlace', 'poHint', 'poAlert', 'poNote']) {
     el[id] = document.getElementById(id);
   }
 
   state.panelId = readPanelId();
   state.cfg = readConfig(state.panelId);
-  state.kind = resolveKind(state.panelId, state.cfg);
-  document.body.classList.add('panel-' + state.kind);
-  el.poTitle.textContent = state.cfg.title || KINDS[state.kind].label;
-  document.title = (state.cfg.title || KINDS[state.kind].label) + ' — Carino Stocks';
+  state.panelKind = resolvePanelKind(state.panelId, state.cfg);
+  // The resolved record, not the raw config: displays.js has already substituted
+  // an unknown kind and written the note that says so.
+  const resolved = readWidget(state.panelId);
+  state.widgetKind = resolveWidgetKind(state.cfg, state.panelKind, resolved);
+  state.symbol = resolveSymbol(state.cfg, resolved);
+  state.widgetNote = resolved && typeof resolved.note === 'string' && resolved.note ? resolved.note : null;
+  paintWidgetNote();
+  // Both classes: the panel id owns the layout (a strip is one line whatever it
+  // draws), the widget kind owns the type scale.
+  document.body.classList.add('panel-' + state.panelKind, 'widget-' + state.widgetKind);
+
+  const title = state.cfg.title || panelTitle();
+  el.poTitle.textContent = title;
+  document.title = title + ' — Carino Stocks';
 
   state.privacy = typeof state.cfg.privacy === 'boolean' ? state.cfg.privacy : !!safeSettings().privacy;
   applyPrivacy();
@@ -77,11 +129,12 @@ function boot() {
   // Read the persisted frame directly instead of waiting for peers.init to
   // hydrate it: init resolves only once leadership settles, and a window that
   // shows a grid of dashes for even a few hundred milliseconds looks broken.
+  refreshShared();
   adoptFrame(readPersistedFrame(), false);
-  render();
+  mount();
 
   connect();
-  setInterval(tickChrome, 1000);
+  setInterval(refresh, 1000);
 
   // The 1Hz interval is throttled to roughly once a minute while the panel is
   // backgrounded, so the chrome can be up to a minute out of date at the exact
@@ -89,27 +142,95 @@ function boot() {
   // current. Re-tick on every path back to the foreground; a panel is only
   // honest if it re-checks its own age before the user can read it.
   for (const ev of ['visibilitychange', 'focus', 'pageshow']) {
-    (ev === 'visibilitychange' ? document : window).addEventListener(ev, tickChrome);
+    (ev === 'visibilitychange' ? document : window).addEventListener(ev, refresh);
   }
-  tickChrome();
+  // Fired by the host's own writes, in this document, for free. Not load-bearing:
+  // the same re-read happens on every frame that arrives.
+  window.addEventListener('storage', (e) => {
+    if (e && e.key && !Object.values(SHARED).includes(e.key)) return;
+    refreshShared();
+    render();
+  });
+  refresh();
 }
 
 /* ---- panel identity ------------------------------------------------------ */
 
 function readPanelId() {
-  let raw = '';
-  try { raw = new URLSearchParams(location.search).get('panel') || ''; } catch (e) { raw = ''; }
+  const raw = urlParam('panel');
   const id = String(raw).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
-  return id || FALLBACK_KIND;
+  return id || FALLBACK_PANEL;
 }
 
-// The id in the URL is opaque, so the kind comes from the stored config first
+function urlParam(name) {
+  try { return new URLSearchParams(location.search).get(name) || ''; } catch (e) { return ''; }
+}
+
+// The id in the URL is opaque, so the layout comes from the stored config first
 // and is only inferred from the id when the config is missing (a cold open).
-function resolveKind(panelId, cfg) {
+// Every candidate is filtered through PANEL_WIDGET, which is what lets `kind`
+// carry a widget id now without the layout misreading it as a panel.
+function resolvePanelKind(panelId, cfg) {
   for (const v of [cfg.kind, cfg.panel, cfg.type, cfg.panelId, panelId]) {
-    if (typeof v === 'string' && Object.prototype.hasOwnProperty.call(KINDS, v)) return v;
+    if (typeof v === 'string' && Object.prototype.hasOwnProperty.call(PANEL_WIDGET, v)) return v;
   }
-  return FALLBACK_KIND;
+  return FALLBACK_PANEL;
+}
+
+/* A widget-configured panel names what it wants to draw; a legacy one names only
+   its panel id, whose `kind` is one of the four and never a widget. `resolved` is
+   displays.js's answer for this panel and therefore comes first — it is the one
+   place the substitution rule lives. The URL is consulted last and only for the
+   kind: displays.js keeps symbols, keys and holdings out of query strings on
+   purpose, and a widget id is not user data. */
+function resolveWidgetKind(cfg, panelKind, resolved) {
+  const w = cfg.widget && typeof cfg.widget === 'object' ? cfg.widget : null;
+  for (const v of [resolved && resolved.kind, w && w.kind, cfg.widgetKind, cfg.kind, urlParam('widget')]) {
+    if (typeof v === 'string' && widgetMeta(v)) return v;
+  }
+  return PANEL_WIDGET[panelKind] || PANEL_WIDGET[FALLBACK_PANEL];
+}
+
+function resolveSymbol(cfg, resolved) {
+  const w = cfg.widget && typeof cfg.widget === 'object' ? cfg.widget : null;
+  for (const v of [resolved && resolved.symbol, w && w.symbol, cfg.symbol]) {
+    if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 24);
+  }
+  return null;
+}
+
+// null for a panel still drawing its legacy content, which is not an error.
+function readWidget(panelId) {
+  const hit = safeCall(() => panelWidget(panelId));
+  return hit && typeof hit === 'object' ? hit : null;
+}
+
+/* A substituted widget must say so. displays.js resolves an unknown kind down to
+   the watchlist rather than opening an empty window, and that is a reasonable
+   choice only as long as the reader is told it was made — otherwise the panel
+   quietly draws something nobody asked for. */
+function paintWidgetNote() {
+  if (!el.poNote) return;
+  el.poNote.textContent = state.widgetNote || '';
+  // The bar is one line and a docked strip is narrow, so the sentence is clipped
+  // on screen and kept whole in the tooltip rather than being cut off outright.
+  if (state.widgetNote) el.poNote.title = state.widgetNote;
+  else el.poNote.removeAttribute('title');
+  el.poNote.hidden = !state.widgetNote;
+}
+
+// A panel showing its own default widget keeps the panel's name: 'Board' is what
+// the user clicked, 'Cards' is how it happens to be drawn. A panel configured
+// with something else is named after that instead, plus its symbol if it is
+// pinned to one, because 'Board' over a single chart would be a lie.
+function panelTitle() {
+  const meta = widgetMeta(state.widgetKind);
+  let label = (meta && meta.label) || 'Panel';
+  if (PANEL_WIDGET[state.panelKind] === state.widgetKind) {
+    const p = PANELS.find((x) => x && x.id === state.panelKind);
+    if (p && p.label) label = p.label;
+  }
+  return state.symbol ? label + ' · ' + state.symbol : label;
 }
 
 function readConfig(panelId) {
@@ -202,12 +323,12 @@ function intOr(v, fb) {
 async function connect() {
   // Handlers first: init awaits the leader lock, and a frame that lands during
   // that window would otherwise be dropped on the floor.
-  safeOn('quotes', (payload) => { adoptFrame(payload, true); render(); tickChrome(); });
-  safeOn('state', (payload) => { applyState(payload); render(); tickChrome(); });
+  safeOn('quotes', (payload) => { adoptFrame(payload, true); refresh(); });
+  safeOn('state', (payload) => { applyState(payload); refresh(); });
   safeOn('session', (payload) => {
     if (payload && typeof payload === 'object' && payload.market && payload.session) {
       state.sessions.set(payload.market, payload.session);
-      tickChrome();
+      refresh();
     }
   });
   safeOn('alert', (payload) => flashAlert(payload));
@@ -218,12 +339,11 @@ async function connect() {
   // after this window read it, still as cold — a stored frame proves nothing
   // about whether a publisher is running now.
   adoptFrame(lastFrameSafe(), false);
-  render();
-  tickChrome();
+  refresh();
 
   // Announce the panel so the leader can push a frame immediately instead of
   // leaving this window stale until its next scheduled tick.
-  try { peers.broadcast('hello', { role: 'popout', panel: state.panelId, kind: state.kind }); } catch (e) { /* noop */ }
+  try { peers.broadcast('hello', { role: 'popout', panel: state.panelId, kind: state.widgetKind }); } catch (e) { /* noop */ }
 }
 
 function safeOn(type, fn) {
@@ -239,15 +359,39 @@ function lastFrameSafe() {
 // timestamp guaranteed to be there, and without one a stored frame would read as
 // ageless and never admit to being stale.
 function readPersistedFrame() {
+  const rec = lsRead('stk_lastframe');
+  if (!rec || typeof rec !== 'object') return null;
+  const inner = rec.frame && typeof rec.frame === 'object' ? rec.frame : rec;
+  if (inner.ts == null && rec.ts != null) return { ...inner, ts: rec.ts };
+  return inner;
+}
+
+function lsRead(key) {
   try {
-    const raw = localStorage.getItem('stk_lastframe');
-    if (!raw) return null;
-    const rec = JSON.parse(raw);
-    if (!rec || typeof rec !== 'object') return null;
-    const inner = rec.frame && typeof rec.frame === 'object' ? rec.frame : rec;
-    if (inner.ts == null && rec.ts != null) return { ...inner, ts: rec.ts };
-    return inner;
+    const raw = localStorage.getItem(key);
+    return raw == null ? null : JSON.parse(raw);
   } catch (e) { return null; }
+}
+
+/* ---- host state outside the frame ---------------------------------------- */
+
+function refreshShared() {
+  for (const [name, key] of Object.entries(SHARED)) {
+    const v = lsRead(key);
+    if (name === 'series' || name === 'profiles') {
+      shared[name] = v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    } else if (name === 'watchlist' || name === 'holdings') {
+      // null is meaningful: not seeded, as opposed to seeded and empty.
+      shared[name] = Array.isArray(v) ? v : null;
+    } else {
+      shared[name] = Array.isArray(v) ? v : [];
+    }
+  }
+  // The alerts widget reads store.alertlog itself, because the fires are not in
+  // any frame and copying a hundred of them into every frame the host publishes
+  // would be worse. Re-pointing the in-memory array is the only way this window
+  // can hand it a current log; nothing here writes storage.
+  try { store.alertlog = shared.alertlog; } catch (e) { /* frozen or absent store */ }
 }
 
 /* ---- frames -------------------------------------------------------------- */
@@ -261,8 +405,21 @@ function adoptFrame(payload, live) {
   // the age already established rather than resetting it to unknown.
   if (!live && frame.ts == null && state.frame && state.frame.ts != null) frame.ts = state.frame.ts;
   state.frame = frame;
-  if (live) { state.frameAt = Date.now(); state.cold = false; }
+  if (live) {
+    state.frameAt = Date.now();
+    state.cold = false;
+    // Only a live frame is a poll. Re-reading the stored one is not new evidence
+    // about whether a quote's timestamp has moved, and counting it as such would
+    // let a dead feed clear its own frozen flag by being read twice.
+    noteFreshness(frame.quotes);
+    refreshShared();
+  }
   if (Array.isArray(frame.symbols)) state.watchlist = frame.symbols;
+  // Each live frame's coverage list is authoritative for that frame, so a symbol
+  // the provider has since started answering for stops being marked. A stored
+  // frame is not allowed to clear it: it is older evidence, not newer.
+  if (Array.isArray(frame.uncovered)) state.uncovered = new Set(frame.uncovered.filter((s) => typeof s === 'string'));
+  else if (live) state.uncovered = new Set();
   if (Number.isFinite(frame.interval)) state.interval = frame.interval;
 }
 
@@ -276,6 +433,10 @@ function normalizeFrame(payload) {
   return {
     quotes,
     symbols,
+    // Additive: the host does not publish this yet, and a panel that assumed an
+    // absent list meant "everything is covered" would print dashes over symbols
+    // the provider has already said it does not have.
+    uncovered: Array.isArray(payload.uncovered) ? payload.uncovered : null,
     ts: num(payload.ts) ?? num(payload.sentAt),
     interval: num(payload.interval),
     paused: payload.paused === true,
@@ -299,10 +460,37 @@ function applyState(payload) {
   if (s && typeof s === 'object' && typeof s.privacy === 'boolean' && typeof state.cfg.privacy !== 'boolean') {
     state.privacy = s.privacy; applyPrivacy();
   }
+  // A watchlist edit usually comes with a rules or holdings edit; both live in
+  // storage rather than in this message.
+  refreshShared();
 }
 
 function applyPrivacy() {
   document.body.classList.toggle('privacy-on', !!state.privacy);
+}
+
+/* ---- freshness -------------------------------------------------------------
+   Straight from app.js: a quote is stale when its own timestamp stops advancing
+   across polls, which is the only evidence there is — a provider that keeps
+   stamping Date.now() on a frozen price would otherwise look permanently live.
+   One observation proves nothing, so the clock only starts on the second frame
+   carrying the same ts. */
+
+function noteFreshness(quotes) {
+  const now = Date.now();
+  for (const [sym, q] of Object.entries(quotes || {})) {
+    if (!q || typeof q !== 'object') continue;
+    const ts = q.ts == null ? null : q.ts;
+    const f = state.freshness[sym];
+    if (!f || f.ts !== ts) state.freshness[sym] = { ts, changedAt: now, polls: 1 };
+    else f.polls++;
+  }
+}
+
+function frozenMs(sym) {
+  const f = state.freshness[sym];
+  if (!f || f.polls < 2) return 0;
+  return Date.now() - f.changedAt;
 }
 
 /* ---- staleness & session chrome ------------------------------------------ */
@@ -329,25 +517,32 @@ function frameAgeMs(now) {
   return Math.max(0, Math.max(byArrival == null ? -Infinity : byArrival, byTs == null ? -Infinity : byTs));
 }
 
+// Cold is stale by definition: a persisted frame proves only that a publisher
+// once existed, never that one is running right now.
+function frameState(now) {
+  const age = frameAgeMs(now);
+  return {
+    age,
+    stale: state.cold || age == null || age > staleAfterMs(),
+    paused: !!(state.frame && state.frame.paused),
+  };
+}
+
 function tickChrome() {
   const now = Date.now();
-  const age = frameAgeMs(now);
+  const fs = frameState(now);
 
-  // Cold is stale by definition: a persisted frame proves only that a publisher
-  // once existed, never that one is running right now.
-  const stale = state.cold || age == null || age > staleAfterMs();
-  if (stale !== state.wasStale) { document.body.classList.toggle('is-stale', stale); state.wasStale = stale; }
+  if (fs.stale !== state.wasStale) { document.body.classList.toggle('is-stale', fs.stale); state.wasStale = fs.stale; }
 
-  if (!stale) {
+  if (!fs.stale) {
     el.poStale.hidden = true;
   } else {
     // A paused leader freezes the numbers on purpose. Dim them all the same —
     // they are still not current — but do not cry feed failure over a choice.
-    const paused = !!(state.frame && state.frame.paused);
     el.poStale.hidden = false;
-    el.poStale.className = 'chip ' + (paused ? 'warn' : 'bad');
-    el.poStale.textContent = age == null ? 'No feed'
-      : (paused ? 'Paused ' : 'Stale ') + formatAge(age);
+    el.poStale.className = 'chip ' + (fs.paused ? 'warn' : 'bad');
+    el.poStale.textContent = fs.age == null ? 'No feed'
+      : (fs.paused ? 'Paused ' : 'Stale ') + fmtAge(fs.age);
   }
 
   paintSession(now);
@@ -370,25 +565,30 @@ function paintSession(now) {
   el.poSession.title = shut ? 'Market is shut — these are the last prices seen, not live ones.' : '';
 }
 
-// The panel's market is whatever its first symbol trades on; a mixed panel gets
-// the honest answer for its leading row rather than a fabricated average.
+// The panel's market is whatever its subject trades on, and for a panel showing
+// a whole watchlist that is its first row: a mixed panel gets the honest answer
+// for its leading symbol rather than a fabricated average. (The session widget
+// is the one that answers per market, which is why it exists.)
 function currentSession(now) {
-  const syms = symbolList();
-  if (!syms.length) return null;
-  const q = quoteFor(syms[0]);
-  let market = 'US_EQUITY';
-  try { market = marketForSymbol(syms[0], q) || 'US_EQUITY'; } catch (e) { /* keep default */ }
+  const sym = state.symbol || state.selection || symbolList()[0];
+  if (!sym) return null;
+  return sessionForMarket(marketFor(sym), now);
+}
 
+// The leader's asserted session outranks the local calendar, because the leader
+// is also corroborating it against the provider — but only until its own stated
+// boundary: past that it is a claim about a session that has already ended.
+function sessionForMarket(market, now) {
   const asserted = state.sessions.get(market);
   if (asserted && typeof asserted === 'object') {
     const boundary = num(asserted.nextChange);
     if (boundary == null || boundary > now) return asserted;
   }
-  try { return sessionAt(now, market); } catch (e) { return null; }
+  return safeCall(() => sessionAt(now, market));
 }
 
-function formatAge(ms) {
-  try { return formatCountdown(ms); } catch (e) { return Math.round(ms / 1000) + 's'; }
+function marketFor(sym) {
+  return safeCall(() => marketForSymbol(sym, quoteFor(sym))) || 'US_EQUITY';
 }
 
 /* ---- alerts -------------------------------------------------------------- */
@@ -408,7 +608,7 @@ function symbolList() {
   const cfgSyms = Array.isArray(state.cfg.symbols) ? state.cfg.symbols.filter((s) => typeof s === 'string') : null;
   if (cfgSyms && cfgSyms.length) return cfgSyms;
   if (Array.isArray(state.watchlist) && state.watchlist.length) return state.watchlist;
-  try { if (Array.isArray(store.watchlist) && store.watchlist.length) return store.watchlist; } catch (e) { /* noop */ }
+  if (Array.isArray(shared.watchlist) && shared.watchlist.length) return shared.watchlist;
   const q = state.frame && state.frame.quotes;
   return q ? Object.keys(q) : [];
 }
@@ -420,186 +620,98 @@ function quoteFor(sym) {
 
 function holdingList() {
   if (Array.isArray(state.holdings)) return state.holdings;
-  try { return Array.isArray(store.holdings) ? store.holdings : []; } catch (e) { return []; }
+  return Array.isArray(shared.holdings) ? shared.holdings : [];
+}
+
+/* The ctx a widget reads, rebuilt on every tick. Frozen shape, so a widget
+   cannot tell a panel from a workspace tile — which is the whole point of the
+   refactor. The two fields a panel genuinely cannot supply are honest about it:
+   ctx.rules and the alert log come from storage rather than the mesh, and
+   ctx.uncovered stays empty until the host publishes it. */
+function buildCtx() {
+  const now = Date.now();
+  const quotes = (state.frame && state.frame.quotes) || {};
+  const fs = frameState(now);
+  // One sessionAt per market rather than per row: the table asks for every row,
+  // and this ctx lives for one second, well inside a session boundary.
+  const sessions = new Map();
+  const markets = new Map();
+
+  const marketOf = (sym) => {
+    if (!markets.has(sym)) markets.set(sym, marketFor(sym));
+    return markets.get(sym);
+  };
+
+  return {
+    quotes,
+    symbols: symbolList(),
+    holdings: holdingList(),
+    rules: shared.rules,
+    // The leader's effective cadence, not this window's stored setting: it is
+    // what every staleness threshold downstream is sized from, and a panel that
+    // used the nominal 15s would cry stale through a 300s closed-market poll.
+    settings: { interval: intervalSec(), privacy: state.privacy },
+    selection: state.selection,
+    seriesFor(sym) {
+      const rec = shared.series && shared.series[sym];
+      return rec && Array.isArray(rec.points) ? rec.points : [];
+    },
+    profileFor(sym) {
+      const p = shared.profiles && shared.profiles[sym];
+      return p && typeof p === 'object' ? p : null;
+    },
+    sessionFor(sym) {
+      const mkt = marketOf(sym);
+      if (!sessions.has(mkt)) sessions.set(mkt, sessionForMarket(mkt, now));
+      return sessions.get(mkt);
+    },
+    marketFor: marketOf,
+    frozenMs,
+    uncovered: state.uncovered,
+    // An unknown age is not a small age. When there is no age at all the footer
+    // already says 'No feed' and the body is dimmed, so nothing is invented here
+    // for the widget's own chip to print.
+    staleMs: fs.stale && fs.age != null ? fs.age : 0,
+    privacy: state.privacy,
+    onSelect,
+  };
+}
+
+/* A panel has no workspace to link, so a click is a local selection: it is what
+   an unpinned quote or chart follows and what the table highlights. It is
+   deliberately not broadcast — a receiver able to retarget the host would make
+   the main window's selection depend on which monitor someone tapped. */
+function onSelect(sym) {
+  if (typeof sym !== 'string' || !sym || sym === state.selection) return;
+  state.selection = sym;
+  render();
+}
+
+function mount() {
+  if (state.widget) { safeCall(() => state.widget.destroy()); state.widget = null; }
+  el.poBody.textContent = '';
+  const host = document.createElement('div');
+  host.className = 'po-widget';
+  el.poBody.appendChild(host);
+  // createWidget never throws: an unknown kind — a config written by a newer
+  // build — renders its own placeholder and the panel chrome stays truthful.
+  state.widget = createWidget(state.widgetKind, host, buildCtx());
+  // A configured symbol is a pin rather than a selection, so clicking around in
+  // the panel cannot silently retarget the display someone set up.
+  if (state.symbol) state.widget.setSymbol(state.symbol);
 }
 
 function render() {
-  const body = el.poBody;
-  body.className = 'po-body';
-  body.textContent = '';
-  const node = KINDS[state.kind].render();
-  if (node) body.appendChild(node);
-  else body.appendChild(empty('Nothing to show — add symbols in the main window.'));
+  if (!state.widget) { mount(); return; }
+  state.widget.update(buildCtx());
 }
 
-function empty(msg) {
-  const d = document.createElement('div');
-  d.className = 'po-empty';
-  d.textContent = msg;
-  return d;
-}
-
-// The board is the watchlist on another monitor, so it renders the watchlist's
-// own card markup against the app's stylesheet rather than a second look-alike.
-// Cards keep their natural height here: stretching eight of them to fill a
-// 1080p screen is what made the panel read as mostly empty.
-function renderBoard() {
-  const syms = symbolList();
-  if (!syms.length) return null;
-  const grid = document.createElement('div');
-  grid.className = 'board';
-  for (const sym of syms) {
-    const q = quoteFor(sym);
-    const prof = store.profiles[sym];
-    const card = node('article', 'card ' + direction(q));
-
-    const head = node('div', 'card-head');
-    const idBox = node('div', 'card-id');
-    idBox.appendChild(node('span', 'card-sym', sym));
-    if (prof && prof.name) idBox.appendChild(node('span', 'card-name', prof.name));
-    head.appendChild(idBox);
-
-    const priceRow = node('div', 'card-price-row');
-    priceRow.appendChild(node('span', 'card-price amount', fmtPrice(q && q.price, q && q.currency, sym)));
-    priceRow.appendChild(deltaChip(q));
-
-    const tags = node('div', 'card-tags');
-    fillCardTags(tags, sym, q);
-
-    card.append(head, priceRow, tags);
-    grid.appendChild(card);
-  }
-  return grid;
-}
-
-// Session and baseline only. The panel deliberately does not repeat the global
-// staleness chip on every card — the footer already says it once, for all of them.
-function fillCardTags(box, sym, q) {
-  const mkt = marketForSymbol(sym, q);
-  if (q && (q.baseline === 'rolling_24h' || mkt === 'CRYPTO')) box.appendChild(node('span', 'tag basis', 'vs 24h'));
-  else if (q && q.baseline === 'prev_close') box.appendChild(node('span', 'tag basis', 'vs prev close'));
-
-  if (mkt === 'CRYPTO') { box.appendChild(node('span', 'tag always', '24/7')); return; }
-  const s = sessionAt(Date.now(), mkt);
-  if (s.state !== 'open') box.appendChild(node('span', 'tag closed', s.label));
-}
-
-function renderTicker() {
-  const syms = symbolList();
-  if (!syms.length) return null;
-  const tape = document.createElement('div');
-  tape.className = 'tape';
-  // Duration scales with content so a two-symbol tape does not sprint past.
-  tape.style.setProperty('--dur', Math.max(18, syms.length * 6) + 's');
-  // The loop is seamless only while the runs together out-span the window, so a
-  // short watchlist gets extra copies instead of a gap chasing the last symbol.
-  const runs = Math.max(2, Math.ceil(12 / syms.length));
-  for (let i = 0; i < runs; i++) tape.appendChild(tickerRun(syms, i > 0));
-  return tape;
-}
-
-function tickerRun(syms, dupe) {
-  const run = document.createElement('div');
-  run.className = 'tape-run' + (dupe ? ' dupe' : '');
-  if (dupe) run.setAttribute('aria-hidden', 'true');
-  for (const sym of syms) {
-    const q = quoteFor(sym);
-    const item = document.createElement('div');
-    item.className = 'tk';
-    item.appendChild(node('span', 'tk-sym', sym));
-    item.appendChild(node('span', 'tk-price amount', fmtPrice(q && q.price, q && q.currency, sym)));
-    item.appendChild(node('span', 'tk-pct ' + direction(q), fmtPct(q && q.changePct)));
-    run.appendChild(item);
-  }
-  return run;
-}
-
-function renderStrip() {
-  const syms = symbolList();
-  if (!syms.length) return null;
-  const row = document.createElement('div');
-  row.className = 'strip';
-  for (const sym of syms) {
-    const q = quoteFor(sym);
-    const item = document.createElement('div');
-    item.className = 'sp';
-    item.appendChild(node('span', 'sp-sym', sym));
-    item.appendChild(node('span', 'sp-price amount', fmtPrice(q && q.price, q && q.currency, sym)));
-    item.appendChild(node('span', 'sp-pct ' + direction(q), fmtPct(q && q.changePct)));
-    row.appendChild(item);
-  }
-  return row;
-}
-
-function renderPortfolio() {
-  const holdings = holdingList();
-  if (!holdings.length) return null;
-  const quotes = (state.frame && state.frame.quotes) || {};
-
-  let totals;
-  try { totals = portfolioTotals(holdings, quotes); }
-  catch (e) { return empty('Portfolio could not be valued.'); }
-
-  const wrap = document.createElement('div');
-  wrap.className = 'pf';
-
-  const tiles = document.createElement('div');
-  tiles.className = 'pf-tiles';
-  tiles.appendChild(pfTile('Total value', fmtPrice(totals.value), null));
-  tiles.appendChild(pfTile('Day P/L', signedPrice(totals.dayPL), sign(totals.dayPL)));
-  tiles.appendChild(pfTile('Total P/L', signedPrice(totals.totalPL),
-    sign(totals.totalPL), totals.totalPLPct != null ? fmtPct(totals.totalPLPct) : null));
-  wrap.appendChild(tiles);
-
-  const rows = document.createElement('div');
-  rows.className = 'pf-rows';
-  const sorted = totals.rows.slice().sort((a, b) => (b.marketValue || 0) - (a.marketValue || 0));
-  for (const r of sorted) {
-    const row = document.createElement('div');
-    row.className = 'pf-row';
-    row.appendChild(node('span', 'pf-sym', r.holding.symbol));
-    row.appendChild(node('span', 'pf-val-cell amount', fmtPrice(r.marketValue)));
-    row.appendChild(node('span', 'pf-day ' + sign(r.dayPL), signedPrice(r.dayPL)));
-    rows.appendChild(row);
-  }
-  wrap.appendChild(rows);
-  return wrap;
-}
-
-function pfTile(label, value, dir, sub) {
-  const t = document.createElement('div');
-  t.className = 'pf-tile';
-  t.appendChild(node('div', 'pf-lbl', label));
-  t.appendChild(node('div', 'pf-val amount ' + (dir || ''), value));
-  if (sub) t.appendChild(node('div', 'pf-lbl', sub));
-  return t;
-}
-
-function deltaChip(q, extraClass) {
-  const dir = direction(q);
-  const c = node('span', 'delta ' + dir + ' ' + extraClass, '');
-  if (!q || q.changePct == null) { c.textContent = '—'; return c; }
-  const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '·';
-  // Crypto and FX quotes often carry a percent without an absolute move; show
-  // the percent alone rather than a dash pretending to be a number.
-  c.textContent = q.change == null ? `${arrow} ${fmtPct(q.changePct)}`
-    : `${arrow} ${fmtMove(q.change, q.price)} (${fmtPct(q.changePct)})`;
-  return c;
-}
-
-function direction(q) {
-  const v = q && (q.changePct ?? q.change);
-  if (v == null) return 'flat';
-  return v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
-}
-
-function sign(v) { return v == null ? '' : v > 0 ? 'up' : v < 0 ? 'down' : ''; }
-
-function node(tag, cls, text) {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls.trim();
-  if (text != null) n.textContent = text;
-  return n;
+// The widgets patch rather than rebuild, and the ages they print climb on a
+// clock rather than on arrivals, so repainting them with the chrome is both
+// cheap and the only way 'Frame 4m old' is ever true.
+function refresh() {
+  render();
+  tickChrome();
 }
 
 /* ---- formatting ---------------------------------------------------------- */
@@ -610,48 +722,31 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function fmtNum(v) {
-  return v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-// Mirrors the main window: two decimals suits equities and misrepresents an FX
-// pair, which moves in the fourth. A pair is a ratio, so it takes no $ prefix.
-// Absolute move, rendered at the precision of the price it moved.
-function fmtMove(v, price) {
-  if (v == null) return '—';
-  const d = priceDecimals(price != null ? price : v);
-  return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-}
-function priceDecimals(v) {
-  const a = Math.abs(Number(v) || 0);
-  if (a >= 100) return 2;
-  if (a >= 1) return 4;
-  if (a >= 0.01) return 5;
-  return 8;
-}
-function fmtPrice(v, currency, symbol) {
-  if (v == null) return '—';
-  let fx = false;
-  try { fx = !!symbol && marketForSymbol(symbol, quoteFor(symbol)) === 'FX'; } catch (e) { /* default to money */ }
-  const prefix = fx ? '' : (!currency || currency === 'USD' ? '$' : currency + ' ');
-  const suffix = fx && currency ? ' ' + currency : '';
-  const d = priceDecimals(v);
-  return prefix + Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) + suffix;
-}
-function signedPrice(v) {
-  if (v == null) return '—';
-  return (v >= 0 ? '+' : '−') + fmtPrice(Math.abs(v));
-}
-function fmtPct(v) { return v == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(Number(v)).toFixed(2) + '%'; }
-
 /* ---- keyboard ------------------------------------------------------------ */
 
 function bindKeys() {
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key;
-    if (k === 'f' || k === 'F') { e.preventDefault(); toggleFullscreen(); }
-    else if (k === 'Escape') { e.preventDefault(); closeSelf(); }
+    if (k === 'f' || k === 'F') {
+      if (isTyping(e.target)) return;   // a widget's own control gets the key
+      e.preventDefault();
+      toggleFullscreen();
+    } else if (k === 'Escape') {
+      // A widget with something open — the table's column menu — owns Escape
+      // first. Closing the whole window instead would be a very expensive way
+      // to dismiss a dropdown.
+      if (document.querySelector('details[open]')) return;
+      e.preventDefault();
+      closeSelf();
+    }
   });
+}
+
+function isTyping(target) {
+  if (!target || !target.tagName) return false;
+  if (target.isContentEditable) return true;
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
 function toggleFullscreen() {

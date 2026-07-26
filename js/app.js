@@ -1,5 +1,15 @@
-/* app.js — Carino Stocks controller + view.
+/* app.js — Carino Stocks controller + chrome.
    Monitoring & visualization only: no trading, no brokerage, no advice.
+
+   What used to be the view is now a workspace: #main holds tabs of widgets
+   (workspace.js, widgets.js) and this file draws only the chrome around them —
+   the header, the rail, the market strip, the drawer, the modals. The controller's
+   remaining job at the boundary is to build ONE ctx object per tick out of the
+   things only it knows (the feed, the freshness ledger, the session calendar, the
+   store) and hand it over. Widgets never fetch and never write storage, so
+   anything that does — removing a symbol, editing a holding, arming a rule — stays
+   here, which is why the rail owns the ✕ and holdings are edited in a modal rather
+   than in the widget that reports them.
 
    Everything the user sees is rendered here, but almost nothing is decided here:
    sessions come from the local calendar (session.js), cross-window coordination
@@ -15,11 +25,16 @@ import { store, normalizeSymbol } from './store.js';
 // budget comes from the facade rather than base.js so the UI never reaches past
 // the provider boundary it is supposed to be insulated from.
 import { market, budget } from './providers/index.js';
-import { sparkline, drawLineChart } from './viz.js';
+import { drawLineChart } from './viz.js';
 import { createScheduler, evaluateAlerts, portfolioTotals, pollSeconds } from './engine.js';
 import { sessionAt, marketForSymbol, formatCountdown, HOLIDAY_HORIZON, MARKETS } from './session.js';
 import { peers } from './peers.js';
 import { displays, PANELS } from './displays.js';
+import { workspace } from './workspace.js';
+// One copy of every number format, shared with the widgets and the popout. The
+// old local copies inferred FX from app state; these take { fx } from the caller,
+// which is why they can be shared at all.
+import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime, fmtCap } from './format.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -51,7 +66,10 @@ const SESSION_SCOPES = { regular: ['open'], extended: ['pre', 'open', 'post'], a
 const SCOPE_LABEL = { regular: 'Regular hours', extended: 'Extended hours', any: 'Any session' };
 
 const state = {
-  quotes: {}, view: 'watch', lastUpdated: 0, fetchError: null,
+  quotes: {}, selection: null, lastUpdated: 0, fetchError: null,
+  // Symbols a fetch asked for and did not get back. Empty until the first tick,
+  // never null, because a widget reads it on every frame.
+  uncovered: new Set(),
   freshness: {},        // symbol -> { ts, changedAt, polls }: staleness is derived, never asserted
   logFilter: '',
   screens: [],
@@ -78,7 +96,7 @@ function boot() {
   wireHashBanner();
   wireDisplays();
   renderRail();
-  renderCards();
+  mountWorkspace();
   renderMarketStrip();
   updateModeChip();
   renderSession();
@@ -92,14 +110,20 @@ function boot() {
   startEngine();
 }
 
-// Session countdowns and staleness ages are the only things that change without a
-// new frame, so they get their own one-second pass instead of a full re-render.
+/* The chrome's second hand. It also hands the widgets a fresh ctx every second,
+   which is not the waste it first looks like: ctx.staleMs is the age of the whole
+   frame, and it is computed here — so a board that only re-rendered on a
+   successful poll could never show a non-zero one. Every path that stops polling
+   (a pause, a failed fetch, a leader that went away) is exactly the path where
+   the age matters most, and it was the one path where nothing was repainting.
+   The cost is bounded because widgets patch rather than rebuild: each one
+   compares before it writes, so a second with no news writes nothing. */
 function startClock() {
   clearInterval(clockTimer);
   let n = 0;
   clockTimer = setInterval(() => {
     renderSession();
-    refreshTags();
+    refreshWidgets();
     if (++n % 10 === 0) checkLeadership();
   }, 1000);
 }
@@ -215,6 +239,10 @@ function publishFrame() {
     // every 300s makes it cry stale through every closed market it ever sees.
     interval: pollSeconds(sess, store.settings.interval),
     paused: !!(scheduler && scheduler.isPaused()),
+    // Without this a panel cannot tell "the provider does not cover this symbol"
+    // from "not fetched yet", so it prints an em dash where this window prints
+    // 'Not covered' — the same quote, described two different ways on two screens.
+    uncovered: [...state.uncovered],
   });
   // One per market on screen, so a panel showing crypto is not handed the equity
   // calendar's idea of closed.
@@ -254,7 +282,7 @@ async function tick() {
 
   const syms = store.watchlist.slice();
   const all = watchedSymbols();
-  if (!all.length) { renderCards(); renderMarketStrip(); return; }
+  if (!all.length) { renderAll(); return; }
 
   let quotes;
   try {
@@ -264,6 +292,10 @@ async function tick() {
     if (e && e.rateLimited) throw e;   // let the scheduler back off on HTTP 429
     state.fetchError = 'Quote fetch failed — check your API key or connection.';
     updateModeChip();
+    // Repaint on the way out. state.lastUpdated is untouched, so this is the tick
+    // that starts the frame visibly ageing; returning without it left the board
+    // looking as live as it did a second ago.
+    renderAll();
     return;
   }
   noteFreshness(quotes);
@@ -284,13 +316,18 @@ async function tick() {
   renderQuota();
 }
 
+// One frame, one repaint. workspace.update() hands the new ctx to each visible
+// widget and lets it patch itself; it adds no timer of its own, so the whole board
+// still moves at the poll cadence the scheduler decided.
 function renderAll() {
-  renderCards();
   renderRail();
-  if (state.view === 'port') renderPortfolio();
+  refreshWidgets();
   renderMarketStrip();
   renderSession();
+  if (!$('holdingsModal').hidden) renderHoldings();
 }
+
+function refreshWidgets() { safe(() => workspace.update()); }
 
 /* ---- freshness -------------------------------------------------------------
    A quote is stale when its own timestamp stops advancing across polls, which is
@@ -415,113 +452,156 @@ function renderSession() {
   if (conflict) cf.textContent = rep.disagreement;
 }
 
-/* ---- watchlist cards ------------------------------------------------------ */
+/* ---- watchlist order ------------------------------------------------------
+   One order, decided here, handed to every widget as ctx.symbols. Widgets do not
+   sort: a board of eight widgets that each sorted for itself would show the same
+   list in eight orders. The table's column sort is a view on top of this one, and
+   its third click comes back to it. */
 function sortedWatchlist() {
   const w = store.watchlist.slice();
-  const mode = $('sortSel').value;
+  // getCtx() may be called before the chrome is wired, and a missing control must
+  // cost the stored order, not the render.
+  const sel = $('sortSel');
+  const mode = sel ? sel.value : 'added';
   if (mode === 'alpha') w.sort((a, b) => a.localeCompare(b));
   else if (mode === 'change') w.sort((a, b) => (state.quotes[b]?.changePct ?? -1e9) - (state.quotes[a]?.changePct ?? -1e9));
   return w;
 }
 
-function renderCards() {
-  const grid = $('cardGrid');
-  const empty = $('emptyState');
-  const list = sortedWatchlist();
-  empty.hidden = list.length > 0;
-  grid.hidden = list.length === 0;
-  grid.textContent = '';
+/* ---- workspace -------------------------------------------------------------
+   #main holds the widget workspace and nothing else. The controller keeps what
+   only it can know — the feed, the freshness ledger, the session calendar, the
+   store — and hands all of it to the widgets as one ctx snapshot per tick. A
+   widget never fetches, never writes storage and never asks app.js a question
+   that is not on this object, which is what makes the same widget safe to run in
+   a detached window. */
+let wsWired = false;
+function mountWorkspace() {
+  const host = $('wsHost');
+  if (!host) return;
+  // store.ensureWorkspaces() is deliberately NOT called here: the default layout
+  // is workspace.js's to define, and workspace.init() seeds it through the store
+  // with its own factory. Calling it from here would mean inventing a second
+  // default that could disagree with the first.
+  safe(() => workspace.init(host, getCtx));
+  // init() may run again (an import or a shared-view exit replaces the stored
+  // layout underneath us), but the change handler is registered exactly once —
+  // twice would mean two rail repaints per selection for the rest of the session.
+  if (!wsWired) { wsWired = true; safe(() => workspace.onChange(onWorkspaceChange)); }
+  // init() recovers the selection from its own linked widgets and announces it
+  // before this handler exists, so the first value is read rather than awaited.
+  state.selection = safe(() => workspace.selection()) || null;
+  markRailSelection();
+  if (!host.childElementCount) {
+    // A workspace that failed to build must say so rather than leave a blank
+    // panel that looks like an empty watchlist.
+    host.appendChild(el('p', 'field-note warn-note',
+      'The widget workspace failed to load, so this area is empty. Your watchlist, holdings and alert rules are '
+      + 'untouched — reload the page, and use Export in Settings if it happens again.'));
+  }
+  syncViewButtons();
+}
 
-  for (const sym of list) {
-    const q = state.quotes[sym];
-    const prof = store.profiles[sym];
-    const card = el('article', 'card');
-    card.dataset.sym = sym;
+// Fresh on every call: the workspace calls it on every update, and a cached ctx
+// is a frame that lies about its own age.
+function getCtx() {
+  const uncovered = state.uncovered instanceof Set ? state.uncovered : new Set();
+  return {
+    quotes: state.quotes,
+    symbols: sortedWatchlist(),
+    holdings: store.holdings,
+    rules: store.rules,
+    settings: store.settings,
+    selection: state.selection,
+    seriesFor,
+    profileFor,
+    sessionFor,
+    marketFor,
+    frozenMs,
+    uncovered,
+    staleMs: frameStaleMs(),
+    privacy: !!store.settings.privacy,
+    onSelect: selectSymbol,
+  };
+}
 
-    const head = el('div', 'card-head');
-    const idBox = el('div', 'card-id');
-    idBox.append(el('span', 'card-sym', sym));
-    idBox.append(el('span', 'card-name', prof?.name || ''));
-    const btns = el('div', 'card-btns');
-    const bell = el('button', 'icon-mini', '🔔'); bell.title = 'Alerts'; bell.dataset.act = 'alert';
-    const rm = el('button', 'icon-mini', '✕'); rm.title = 'Remove'; rm.dataset.act = 'remove';
-    const nrules = store.rulesFor(sym).filter((r) => r.armed).length;
-    if (nrules) { const b = el('span', 'rule-badge', String(nrules)); bell.appendChild(b); }
-    btns.append(bell, rm);
-    head.append(idBox, btns);
+function seriesFor(sym) {
+  const rec = store.series[sym];
+  return rec && Array.isArray(rec.points) ? rec.points : [];
+}
+function profileFor(sym) { return store.profiles[sym] || null; }
+function marketFor(sym) { return safe(() => marketForSymbol(sym, state.quotes[sym]), 'US_EQUITY') || 'US_EQUITY'; }
 
-    const priceRow = el('div', 'card-price-row');
-    priceRow.append(el('span', 'card-price amount', q ? fmtPrice(q.price, q.currency, sym) : '—'));
-    priceRow.append(deltaChip(q));
+/* The age of the whole frame, not of one symbol: zero while the last completed
+   poll is still current, and the real age once it is not. Reported rather than
+   hidden, because every figure a widget draws is exactly this far behind — and
+   the commonest cause is a pause the user forgot they set. */
+function frameStaleMs() {
+  if (!state.lastUpdated) return 0;
+  const age = Date.now() - state.lastUpdated;
+  return age > staleThreshold() ? age : 0;
+}
 
-    const tags = el('div', 'card-tags');
-    tags.dataset.sym = sym;
-    fillTags(tags, sym);
+/* Every path that changes which symbol the app is talking about goes through
+   here: a widget's onSelect, a rail click, a card click inside the cards widget.
+   The drawer opens because that is what clicking a symbol has always done, and
+   the workspace selection moves so that linked widgets follow. */
+function selectSymbol(sym) {
+  const clean = normalizeSymbol(sym);
+  if (!clean) return;
+  state.selection = clean;
+  safe(() => workspace.select(clean));
+  // Repaint now rather than at the next poll: with a shut market the cadence
+  // floor is five minutes, and a board that takes five minutes to agree about
+  // which symbol is selected reads as broken.
+  refreshWidgets();
+  markRailSelection();
+  openDrawer(clean);
+}
 
-    const spark = el('div', 'card-spark');
-    spark.innerHTML = sparkline(store.series[sym]?.points || []);
+function onWorkspaceChange(info) {
+  state.selection = (info && info.selection) || null;
+  markRailSelection();
+  syncViewButtons();
+}
 
-    const range = el('div', 'card-range');
-    range.appendChild(rangeBar(q));
-
-    const foot = el('div', 'card-foot');
-    foot.append(el('span', 'card-src', q ? q.source : '—'));
-    foot.append(el('span', 'card-ts', q ? 'as of ' + fmtTime(q.ts) : ''));
-
-    card.append(head, priceRow, tags, spark, range, foot);
-    grid.appendChild(card);
+function markRailSelection() {
+  for (const row of document.querySelectorAll('.rail-row[data-sym]')) {
+    row.classList.toggle('active', row.dataset.sym === state.selection);
   }
 }
 
-// Baseline, session and staleness for one symbol. Rebuilt in place by the clock
-// so a dead feed's age keeps climbing instead of freezing at whatever the last
-// frame said.
-function fillTags(box, sym) {
-  const q = state.quotes[sym];
-  const mkt = marketForSymbol(sym, q);
-  const s = sessionAt(Date.now(), mkt);
-  const stale = s.isTradeable ? frozenMs(sym) : 0;
-  const parts = [];
+/* The old Watchlist/Portfolio toggle, kept as a shortcut to the tab that shows
+   each thing. Tabs are the navigation now; two navigations that can disagree
+   about what is on screen is worse than one. A user whose layout has no such tab
+   is not told no — the widget is added and the addition is announced, because
+   losing sight of a portfolio you entered by hand is not an acceptable answer. */
+const VIEW_KINDS = { watch: ['cards', 'table'], port: ['portfolio'] };
 
-  // 'unknown' is a real answer, not a missing one: an FX spot rate has no
-  // reference close, and printing "vs prev close" over it would invent the
-  // comparison the provider just said it could not make.
-  if (q) {
-    if (q.baseline === 'rolling_24h' || q.baseline === 'prev_close') {
-      parts.push(['basis', q.baseline === 'rolling_24h' ? 'vs 24h' : 'vs prev close',
-        q.baselineNote || 'Baseline reported by the data provider.']);
-    } else if (mkt === 'CRYPTO') {
-      parts.push(['basis', 'vs 24h', q.baselineNote || 'Baseline inferred from asset class — the provider did not state one.']);
-    } else {
-      parts.push(['basis unstated', 'no baseline',
-        q.baselineNote || 'The provider did not say what this change is measured against.']);
-    }
+function gotoView(view) {
+  const kinds = VIEW_KINDS[view] || [];
+  const tabs = safe(() => workspace.tabs(), []) || [];
+  const found = tabs.find((t) => t.widgets.some((w) => kinds.includes(w.kind)));
+  if (found) {
+    if (found.id !== safe(() => workspace.activeTabId())) workspace.setActiveTab(found.id);
+    syncViewButtons();
+    return;
   }
-
-  if (!q && state.uncovered && state.uncovered.has(sym)) {
-    parts.push(['uncovered', 'Not covered',
-      'The provider handling this symbol returned no quote for it. Try another provider in Settings, '
-      + 'or check the symbol.']);
-  }
-
-  if (mkt === 'CRYPTO') parts.push(['always', '24/7', 'Crypto trades continuously; it is never closed.']);
-  else if (s.state !== 'open') parts.push(['closed', s.label, [s.detail, s.nextLabel].filter(Boolean).join(' · ')]);
-
-  if (stale > staleThreshold()) parts.push(['stale', 'Stale ' + formatCountdown(stale), 'This quote’s own timestamp has not advanced while the market is tradeable.']);
-
-  const sig = parts.map((p) => p[0] + p[1]).join('|');
-  if (box.dataset.sig === sig) return;
-  box.dataset.sig = sig;
-  box.textContent = '';
-  for (const [kind, text, tip] of parts) {
-    const t = el('span', 'tag ' + kind, text);
-    if (tip) t.title = tip;
-    box.appendChild(t);
-  }
+  const added = safe(() => workspace.addWidget(kinds[0]));
+  if (added) toast('Added a ' + (view === 'port' ? 'Portfolio' : 'Cards') + ' widget to this tab.');
+  else toast('Could not add that widget — use ＋ Widget above the grid.', 'err');
+  syncViewButtons();
 }
 
-function refreshTags() {
-  for (const box of document.querySelectorAll('.card-tags[data-sym]')) fillTags(box, box.dataset.sym);
+// Both buttons can be lit at once: a tab holding a card grid and a portfolio is a
+// layout the workspace allows, and pretending one of them is not there would be
+// the lie the toggle used to tell.
+function syncViewButtons() {
+  const id = safe(() => workspace.activeTabId());
+  const tab = (safe(() => workspace.tabs(), []) || []).find((t) => t.id === id);
+  const kinds = tab ? tab.widgets.map((w) => w.kind) : [];
+  $('viewWatch').classList.toggle('active', kinds.some((k) => VIEW_KINDS.watch.includes(k)));
+  $('viewPort').classList.toggle('active', kinds.some((k) => VIEW_KINDS.port.includes(k)));
 }
 
 function deltaChip(q) {
@@ -535,41 +615,42 @@ function deltaChip(q) {
   return c;
 }
 
-function rangeBar(q) {
-  const bar = el('div', 'rangebar');
-  if (!q || q.low == null || q.high == null || q.price == null || q.high <= q.low) { bar.classList.add('empty'); return bar; }
-  const pct = Math.max(0, Math.min(100, ((q.price - q.low) / (q.high - q.low)) * 100));
-  bar.append(el('span', 'rb-lo', fmtNum(q.low)));
-  const track = el('div', 'rb-track'); const mark = el('div', 'rb-mark'); mark.style.left = pct + '%';
-  track.appendChild(mark); bar.appendChild(track);
-  bar.append(el('span', 'rb-hi', fmtNum(q.high)));
-  return bar;
-}
-
-/* card click delegation */
-document.addEventListener('click', (e) => {
-  const card = e.target.closest && e.target.closest('.card');
-  if (!card) return;
-  const sym = card.dataset.sym;
-  const act = e.target.dataset.act;
-  if (act === 'remove') { store.removeSymbol(sym); refreshAll(); }
-  else if (act === 'alert') { openAlerts(sym); }
-  else { openDrawer(sym); }
-});
-
-/* ---- left rail ------------------------------------------------------------ */
+/* ---- left rail --------------------------------------------------------------
+   The rail is the one list that is always on screen whatever the workspace looks
+   like, so it owns the two things a widget may not do: it removes a symbol, and
+   it is the keyboard route into the board. The row is a real button for that
+   reason — the old div was reachable by mouse only. */
 function renderRail() {
   const list = $('railList');
   list.textContent = '';
-  for (const sym of sortedWatchlist()) {
+  const syms = sortedWatchlist();
+  for (const sym of syms) {
     const q = state.quotes[sym];
     const row = el('div', 'rail-row'); row.dataset.sym = sym;
-    row.append(el('span', 'rr-sym', sym));
-    row.append(el('span', 'rr-price amount', q ? fmtPrice(q.price, q.currency, sym) : '—'));
-    row.appendChild(deltaChip(q));
-    row.addEventListener('click', () => openDrawer(sym));
+    if (sym === state.selection) row.classList.add('active');
+
+    const pick = el('button', 'rr-btn');
+    pick.type = 'button';
+    pick.title = 'Show ' + sym;
+    pick.append(el('span', 'rr-sym', sym));
+    pick.append(el('span', 'rr-price amount', q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : '—'));
+    pick.appendChild(deltaChip(q));
+    pick.addEventListener('click', () => selectSymbol(sym));
+    row.appendChild(pick);
+
+    const rm = el('button', 'icon-mini rr-x', '✕');
+    rm.type = 'button';
+    rm.title = 'Remove ' + sym + ' from the watchlist';
+    rm.setAttribute('aria-label', 'Remove ' + sym);
+    rm.addEventListener('click', () => { store.removeSymbol(sym); refreshAll(); });
+    row.appendChild(rm);
+
     list.appendChild(row);
   }
+  // The widgets can only report an empty watchlist; the offer to fill one lives
+  // here, next to the list it would fill.
+  const empty = $('railEmpty');
+  if (empty) empty.hidden = syms.length > 0;
 }
 
 /* ---- market strip --------------------------------------------------------- */
@@ -583,6 +664,7 @@ function renderMarketStrip() {
     const q = state.quotes[sym];
     const tile = el('div', 'stat-tile');
     tile.append(el('div', 'st-label', label));
+    // No { fx }: these three are US equity ETFs, so the dollar prefix is right.
     tile.append(el('div', 'st-value amount', q ? fmtPrice(q.price, q.currency) : '—'));
     tile.appendChild(deltaChip(q));
     tiles.appendChild(tile);
@@ -628,6 +710,15 @@ async function renderDrawer() {
   if (sess.approx) line.append(el('span', 'tag approx', 'approx'));
   const froz = sess.isTradeable ? frozenMs(sym) : 0;
   if (froz > staleThreshold()) line.append(el('span', 'tag stale', 'Stale ' + formatCountdown(froz)));
+  // The per-card bell is gone with the card grid — a widget may not write rules —
+  // so the route from "this symbol" to "alert me about it" lives here instead.
+  const ruleBtn = el('button', 'cs-btn sm ds-alert', '🔔 Alert rule');
+  ruleBtn.type = 'button';
+  const armed = safe(() => store.rulesFor(sym).filter((r) => r.armed).length, 0);
+  ruleBtn.title = armed ? armed + ' armed rule' + (armed === 1 ? '' : 's') + ' on ' + sym : 'No rules on ' + sym + ' yet';
+  if (armed) ruleBtn.appendChild(el('span', 'rule-badge', String(armed)));
+  ruleBtn.addEventListener('click', () => openAlerts(sym));
+  line.append(el('span', 'spacer'), ruleBtn);
   body.appendChild(line);
 
   const kv = el('div', 'kv-grid');
@@ -637,14 +728,16 @@ async function renderDrawer() {
     if (tip) d.title = tip;
     kv.append(d);
   };
-  pair('Last', q ? fmtPrice(q.price, q.currency, sym) : '—');
-  pair('Change', q && q.changePct != null ? `${fmtNum(q.change)} (${fmtNum(q.changePct)}%)` : '—');
+  pair('Last', q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : '—');
+  // Every figure on this row inherits the price's precision, as the delta chip
+  // already did: two decimals turns a sub-dollar coin's whole day into "0.00".
+  pair('Change', q && q.changePct != null ? `${fmtMove(q.change, q.price)} (${fmtNum(q.changePct)}%)` : '—');
   // The three-value vocabulary is too coarse for "an IEX close" versus "the
   // official one", so the provider's own sentence is the tooltip when it has one.
   pair('Baseline', baselineText(sym, q), q && q.baselineNote ? q.baselineNote : null);
-  pair('Open', q ? fmtNum(q.open) : '—');
-  pair('Prev close', q ? fmtNum(q.prevClose) : '—');
-  pair('Day range', q && q.low != null ? `${fmtNum(q.low)} – ${fmtNum(q.high)}` : '—');
+  pair('Open', q ? fmtMove(q.open, q.price) : '—');
+  pair('Prev close', q ? fmtMove(q.prevClose, q.price) : '—');
+  pair('Day range', q && q.low != null ? `${fmtMove(q.low, q.price)} – ${fmtMove(q.high, q.price)}` : '—');
   pair('Volume', q && q.volume != null ? fmtInt(q.volume) : '—');
   if (prof) { pair('Exchange', prof.exchange || '—'); pair('Sector', prof.sector || '—'); pair('Market cap', prof.marketCap ? fmtCap(prof.marketCap) : '—'); }
   body.appendChild(kv);
@@ -680,7 +773,12 @@ function baselineText(sym, q) {
   return 'Not stated by provider';
 }
 
-/* ---- portfolio ------------------------------------------------------------ */
+/* ---- holdings editor -------------------------------------------------------
+   The Portfolio widget reports the numbers; widgets are readers and may not
+   touch storage, so entering, editing and deleting a holding happens in this
+   modal. It shows only the fields an edit needs — value and P/L belong to the
+   widget, and a second set of totals in a second place is a second thing to
+   disagree with. */
 
 // Totals are a plain sum with no FX conversion in it, so they may only carry a
 // currency symbol when every holding is quoted in the same one. Mixed holdings
@@ -696,64 +794,49 @@ function portfolioCurrency() {
   return set.size === 1 ? [...set][0] : null;
 }
 
-function renderPortfolio() {
-  const { rows, value, cost, dayPL, totalPL, totalPLPct } = portfolioTotals(store.holdings, state.quotes);
+function openHoldings() {
+  openModal('holdingsModal', renderHoldings);
+}
+
+function renderHoldings() {
+  const { rows } = portfolioTotals(store.holdings, state.quotes);
   const cur = portfolioCurrency();
   const money = (v) => (v == null ? '—' : cur === false ? fmtNum(v) : fmtPrice(v, cur));
-  const signedMoney = (v) => (v == null ? '—' : (v >= 0 ? '+' : '−') + money(Math.abs(v)));
-  const curNote = $('portCurNote');
-  curNote.hidden = cur !== false;
+  const note = $('holdCurNote');
+  note.hidden = cur !== false;
   if (cur === false) {
-    curNote.textContent = 'Your holdings are quoted in more than one currency. These totals are a plain sum with no '
-      + 'conversion applied, so they are shown without a currency symbol.';
+    note.textContent = 'Your holdings are quoted in more than one currency. Market values are shown without a currency '
+      + 'symbol, because nothing here converts between them.';
   }
-  const stats = $('portStats');
-  stats.textContent = '';
-  const tile = (label, val, delta) => {
-    const t = el('div', 'stat-tile');
-    t.append(el('div', 'st-label', label));
-    t.append(el('div', 'st-value amount', val));
-    if (delta) t.appendChild(delta);
-    return t;
-  };
-  stats.append(tile('Total value', money(value)));
-  stats.append(tile('Day P/L', signedMoney(dayPL), plChip(dayPL, null)));
-  stats.append(tile('Total P/L', signedMoney(totalPL), plChip(totalPL, totalPLPct)));
-  stats.append(tile('Cost basis', money(cost)));
 
-  const body = $('portBody');
+  const body = $('holdBody');
   body.textContent = '';
   if (!rows.length) {
-    const tr = el('tr'); const td = el('td', 'empty-cell', 'No holdings yet. Add one below.'); td.colSpan = 9; tr.appendChild(td); body.appendChild(tr);
+    const tr = el('tr'); const td = el('td', 'empty-cell', 'No holdings yet. Add one below.');
+    td.colSpan = 6; tr.appendChild(td); body.appendChild(tr);
     return;
   }
   for (const r of rows) {
+    const sym = r.holding.symbol;
     const tr = el('tr'); tr.dataset.id = r.holding.id;
-    const cells = [
-      r.holding.symbol,
-      fmtNum(r.shares), fmtNum(r.avg),
-      r.price != null ? fmtNum(r.price) : '—',
-      money(r.marketValue),
-      signedMoney(r.dayPL),
-      signedMoney(r.totalPL),
-      r.weight != null ? r.weight.toFixed(1) + '%' : '—',
-    ];
-    tr.append(el('td', 'sym', cells[0]));
-    for (let i = 1; i < cells.length; i++) {
-      const td = el('td', 'num amount', cells[i]);
-      if (i === 5 && r.dayPL != null) td.classList.add(r.dayPL >= 0 ? 'pos' : 'neg');
-      if (i === 6 && r.totalPL != null) td.classList.add(r.totalPL >= 0 ? 'pos' : 'neg');
-      tr.appendChild(td);
-    }
-    const edit = el('td'); const eb = el('button', 'icon-mini', '✎'); eb.addEventListener('click', () => openHolding(r.holding)); edit.appendChild(eb); tr.appendChild(edit);
+    tr.append(el('td', 'sym', sym));
+    tr.append(el('td', 'num amount', fmtNum(r.shares)));
+    tr.append(el('td', 'num amount', fmtMove(r.avg, r.price)));
+    // An unpriced holding is not worth zero — it is worth an unknown amount, and
+    // the provider that did not cover it is the reason.
+    tr.append(el('td', 'num amount', r.price != null
+      ? fmtPrice(r.price, state.quotes[sym] && state.quotes[sym].currency, fxOpts(sym))
+      : (state.uncovered && state.uncovered.has(sym) ? 'Not covered' : '—')));
+    tr.append(el('td', 'num amount', money(r.marketValue)));
+    const edit = el('td');
+    const eb = el('button', 'icon-mini', '✎');
+    eb.type = 'button';
+    eb.title = 'Edit ' + sym;
+    eb.setAttribute('aria-label', 'Edit holding ' + sym);
+    eb.addEventListener('click', () => openHolding(r.holding));
+    edit.appendChild(eb); tr.appendChild(edit);
     body.appendChild(tr);
   }
-}
-function plChip(v, pct) {
-  if (v == null) return null;
-  const c = el('span', 'delta ' + (v >= 0 ? 'up' : 'down'));
-  c.textContent = (v >= 0 ? '▲' : '▼') + (pct != null ? ' ' + fmtNum(pct) + '%' : '');
-  return c;
 }
 
 /* ---- controls ------------------------------------------------------------- */
@@ -770,8 +853,9 @@ function wireControls() {
   });
   $('intervalSel').value = String(store.settings.interval);
   $('btnAdd').addEventListener('click', () => openModal('addModal', () => { $('addSearch').value = ''; $('addAuto').textContent = ''; $('addSearch').focus(); }));
-  $('viewWatch').addEventListener('click', () => setView('watch'));
-  $('viewPort').addEventListener('click', () => setView('port'));
+  $('viewWatch').addEventListener('click', () => gotoView('watch'));
+  $('viewPort').addEventListener('click', () => gotoView('port'));
+  $('btnHoldings').addEventListener('click', openHoldings);
   $('btnPrivacy').addEventListener('click', () => { setPrivacy(!store.settings.privacy); publishState(); });
   $('btnAlerts').addEventListener('click', () => openAlerts(store.watchlist[0] || ''));
   $('btnSettings').addEventListener('click', openSettings);
@@ -781,7 +865,7 @@ function wireControls() {
     pollStatus(true);
     toast('Re-checking the session with your data provider.');
   });
-  $('sortSel').addEventListener('change', () => { renderCards(); renderRail(); });
+  $('sortSel').addEventListener('change', () => { renderRail(); refreshWidgets(); });
 
   wireAutocomplete($('railSearch'), $('railAuto'), (sym) => { if (store.addSymbol(sym)) { $('railSearch').value = ''; $('railAuto').hidden = true; refreshAll(); } });
   $('emptyAdd').addEventListener('click', () => $('btnAdd').click());
@@ -793,18 +877,15 @@ function wireControls() {
   setPrivacy(store.settings.privacy);
 }
 
-function setView(v) {
-  state.view = v;
-  $('watchView').hidden = v !== 'watch';
-  $('portView').hidden = v !== 'port';
-  $('viewWatch').classList.toggle('active', v === 'watch');
-  $('viewPort').classList.toggle('active', v === 'port');
-  if (v === 'port') renderPortfolio();
-}
+/* body.privacy-on covers the chrome. A widget applies the blur itself from
+   ctx.privacy, because a detached panel is a different document and has no body
+   class of ours to read — so the widgets are told at once rather than at the next
+   poll, which with a shut market is five minutes of unblurred figures. */
 function setPrivacy(on) {
   store.settings.privacy = on; store.saveSettings();
   document.body.classList.toggle('privacy-on', on);
   $('btnPrivacy').classList.toggle('active', on);
+  refreshWidgets();
 }
 
 /* ---- shared-link banner ----------------------------------------------------
@@ -824,6 +905,7 @@ function wireHashBanner() {
       safe(() => history.replaceState(null, '', location.pathname + location.search));
     }
     banner.hidden = true;
+    mountWorkspace();
     refreshAll();
     toast('Shared watchlist saved to this browser.');
   });
@@ -832,6 +914,9 @@ function wireHashBanner() {
     if (typeof store.exitHash === 'function') {
       store.exitHash();
       banner.hidden = true;
+      // exitHash puts the saved layout back; without this the screen would keep
+      // showing the tabs the shared view was arranged in.
+      mountWorkspace();
       refreshAll();
       toast('Shared view discarded — your saved watchlist is back.');
     } else {
@@ -1021,7 +1106,11 @@ function doImport(e) {
   rd.onload = () => {
     try {
       const r = store.importState(rd.result);
-      applySettingsToUI(); refreshAll();
+      applySettingsToUI();
+      // The import replaced the stored layout in place; the frames on screen are
+      // still the old tab's, so the workspace is rebuilt rather than left lying.
+      mountWorkspace();
+      refreshAll();
       const dropped = r && r.dropped ? Object.values(r.dropped).reduce((a, b) => a + b, 0) : 0;
       toast(r
         ? `Imported ${r.watchlist} symbols, ${r.rules} rules, ${r.holdings} holdings.` + (dropped ? ` ${dropped} unreadable entries were skipped.` : '')
@@ -1136,6 +1225,11 @@ function wireDisplays() {
     const res = displays.open($('dispPanel').value, {
       mode: $('dispMode').value,
       screenId: $('dispScreen').value || null,
+      // Explicitly null, not omitted: displays.open() reads an omitted `widget` as
+      // "keep whatever this panel last drew", so a panel that once hosted a
+      // popped-out widget would re-open as that widget while this picker still
+      // named the panel. The orphan re-adopt below omits it on purpose.
+      widget: null,
     });
     Promise.resolve(res).then((r) => {
       if (!r) return;
@@ -1309,7 +1403,7 @@ function addRuleFromForm() {
     sessions: SESSION_SCOPES[scope].slice(),
   });
   $('ruleVal').value = '';
-  renderRuleList(); renderCards();
+  renderRuleList(); refreshWidgets();
 }
 
 // Legacy rules carry no `sessions`, and they were written when every session
@@ -1326,7 +1420,7 @@ function renderRuleList() {
   for (const r of store.rules) {
     const row = el('div', 'rule-row');
     const sw = el('button', 'switch' + (r.armed ? ' on' : '')); sw.title = 'Arm/disarm';
-    sw.addEventListener('click', () => { store.updateRule(r.id, { armed: !r.armed }); renderRuleList(); renderCards(); });
+    sw.addEventListener('click', () => { store.updateRule(r.id, { armed: !r.armed }); renderRuleList(); refreshWidgets(); });
     row.appendChild(sw);
     row.append(el('span', 'rr-sym', r.symbol));
     row.append(el('span', 'rule-cond', `${r.type === 'pct' ? 'Δ%' : 'price'} ${r.op === 'above' ? '≥' : '≤'} ${r.value}${r.type === 'pct' ? '%' : ''}`));
@@ -1336,7 +1430,7 @@ function renderRuleList() {
       : scope === 'extended' ? 'Pre-market, regular hours and after hours.'
         : 'Every session, including while the market is closed.';
     row.appendChild(chip);
-    const del = el('button', 'icon-mini', '✕'); del.addEventListener('click', () => { store.removeRule(r.id); renderRuleList(); renderCards(); });
+    const del = el('button', 'icon-mini', '✕'); del.addEventListener('click', () => { store.removeRule(r.id); renderRuleList(); refreshWidgets(); });
     row.appendChild(del);
     list.appendChild(row);
   }
@@ -1376,7 +1470,9 @@ function renderAlertLog() {
     }
     r.append(el('span', 'log-text', a.text));
     if (a.quote && a.quote.price != null) {
-      const snap = el('span', 'log-snap amount', fmtPrice(a.quote.price, a.quote.currency)
+      // The logged symbol decides the prefix, not the live watchlist: an FX entry
+      // must still read '1.0848 USD' months after the pair left the board.
+      const snap = el('span', 'log-snap amount', fmtPrice(a.quote.price, a.quote.currency, fxOpts(a.symbol))
         + (a.quote.changePct != null ? ' (' + fmtNum(a.quote.changePct) + '%)' : ''));
       snap.title = 'Quote at the moment the rule fired' + (a.quote.source ? ' · ' + a.quote.source : '');
       r.append(snap);
@@ -1420,11 +1516,14 @@ function saveHolding() {
   const rec = { symbol, shares, cost: Number.isFinite(cost) ? cost : 0, costMode: $('holdMode').value, note: $('holdNote').value.trim() };
   if (editingHolding) { Object.assign(editingHolding, rec); }
   else { rec.id = 'h' + Date.now() + Math.floor(Math.random() * 1e4); store.holdings.push(rec); }
-  store.saveHoldings(); closeModal(); refreshAll();
+  store.saveHoldings();
+  // Back to the list rather than to no modal at all: an edit is usually one of
+  // several, and closing outright hides whether the change landed.
+  refreshAll(); openHoldings();
 }
 function deleteHolding() {
   if (editingHolding) { store.holdings = store.holdings.filter((x) => x.id !== editingHolding.id); store.saveHoldings(); }
-  closeModal(); refreshAll();
+  refreshAll(); openHoldings();
 }
 
 /* ---- alert delivery ------------------------------------------------------- */
@@ -1493,61 +1592,25 @@ function updateModeChip() {
   chip.title = 'Data source' + (leaderless ? ' · refreshing independently: no window holds the shared lock' : '');
 }
 function refreshAll() {
-  renderRail(); renderCards(); updateModeChip(); renderMarketStrip(); renderSession();
-  if (state.view === 'port') renderPortfolio();
+  renderRail(); refreshWidgets(); updateModeChip(); renderMarketStrip(); renderSession();
+  if (!$('holdingsModal').hidden) renderHoldings();
   publishState();
   scheduler && scheduler.now();
 }
 
-/* ---- formatters ----------------------------------------------------------- */
-// The provider layer reports a real ISO code where it knows one and null where it
-// does not, so the '$' is only for the currency that actually is dollars. A
-// portfolio total mixes currencies and is therefore printed without a symbol at
-// all rather than picking one of them to be wrong in.
-// Two decimals is right for equities and wrong for almost everything else: an FX
-// pair moves in the fourth, and a sub-dollar coin has nothing left at the second.
-// Precision follows the magnitude of the number, not the asset class, so it stays
-// correct for a symbol whose class we guessed wrong.
-function priceDecimals(v) {
-  const a = Math.abs(Number(v) || 0);
-  if (a >= 100) return 2;
-  if (a >= 1) return 4;
-  if (a >= 0.01) return 5;
-  return 8;
-}
-function fmtPrice(v, currency, symbol) {
-  if (v == null) return '—';
-  // An FX pair is a ratio, not an amount of anything — 'EURUSD $1.08' reads as a
-  // dollar price for a euro. Quote the counter currency instead.
-  const fx = symbol && isFxSymbol(symbol);
-  const prefix = fx ? '' : (!currency || currency === 'USD' ? '$' : currency + ' ');
-  const suffix = fx && currency ? ' ' + currency : '';
-  const d = priceDecimals(v);
-  return prefix + Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) + suffix;
-}
-function isFxSymbol(sym) {
-  try { return marketForSymbol(sym, state.quotes[sym]) === 'FX'; } catch (e) { return false; }
-}
-// Absolute move, rendered at the precision of the price it moved.
-function fmtMove(v, price) {
-  if (v == null) return '—';
-  const d = priceDecimals(price != null ? price : v);
-  return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-}
-function fmtNum(v) { return v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function fmtInt(v) { return v == null ? '—' : Number(v).toLocaleString('en-US'); }
-function fmtTime(ts) { return new Date(ts).toLocaleTimeString('en-US', { hour12: false }); }
+/* ---- formatters -------------------------------------------------------------
+   Numbers are formatted in format.js, which this file imports rather than
+   reimplements. Only the FX decision lives here, because it is the one part that
+   needs app state: whether a symbol is a ratio rather than an amount of money is
+   a question about the routed market, and format.js is deliberately stateless.
+   Bytes stay local — the storage note is the only caller in the app. */
+const fxOpts = (sym) => ({ fx: safe(() => marketForSymbol(sym, state.quotes[sym]) === 'FX', false) });
+
 function fmtBytes(n) {
   const b = Number(n) || 0;
   if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
   if (b >= 1024) return Math.round(b / 1024) + ' KB';
   return b + ' bytes';
-}
-function fmtCap(v) {
-  if (v >= 1e12) return '$' + (v / 1e12).toFixed(2) + 'T';
-  if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
-  if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M';
-  return '$' + fmtInt(v);
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

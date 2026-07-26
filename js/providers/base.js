@@ -49,7 +49,15 @@ export function normQuote(symbol, q, source) {
     // Provider-ASSERTED session. Never inferred from a clock, never guessed
     // from a price timestamp: a wrong badge is worse than an absent one.
     session: SESSIONS.has(q.session) ? q.session : null,
-    source, ts: q.ts || Date.now(),
+    source,
+    // Only Finnhub reports a timestamp for the print itself; for every other
+    // adapter this is the moment WE fetched, which is a different fact. Keeping
+    // both under one field made 'As of' claim a precision it did not have, and
+    // left a frozen quote indistinguishable from a fresh one — the fetch time
+    // advances on every poll even when the price behind it has not moved since
+    // Friday. tsSource lets a reader be told which of the two they are looking at.
+    ts: q.ts || Date.now(),
+    tsSource: q.ts != null ? 'provider' : 'fetch',
   };
 }
 

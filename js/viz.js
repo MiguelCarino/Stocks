@@ -1,6 +1,16 @@
 /* viz.js — dependency-free chart primitives.
    sparkline(): inline SVG micro line+area for cards.
-   drawLineChart(): themed <canvas> line chart for the detail drawer. */
+   drawLineChart(): themed <canvas> line chart for the drawer and the chart widget.
+
+   The y axis borrows format.js's precision rule rather than fixing two decimals.
+   That is not cosmetic: five gridlines all reading '0.00' over a line that
+   visibly slopes says the market is flat, which for a sub-dollar coin — most of
+   the crypto side of a watchlist — is the opposite of what the series shows. The
+   axis is also measured before the plot area is laid out, because a price with
+   eight decimals needs more room than one with two and a clipped label is a
+   number the reader has to guess at. */
+
+import { fmtMove } from './format.js';
 
 // Build an inline-SVG sparkline string from an array of numbers.
 // dir: 'up' | 'down' | 'flat' selects the accent color via CSS classes.
@@ -40,7 +50,12 @@ export function drawLineChart(canvas, points) {
   const rect = canvas.getBoundingClientRect();
   const W = Math.max(1, rect.width), H = Math.max(1, rect.height);
   canvas.width = W * dpr; canvas.height = H * dpr;
+  // A 2d context is never actually refused by a browser, but this runs inside a
+  // requestAnimationFrame callback in the chart widget — outside the try/catch
+  // that would otherwise stop the widget and say so — so a null one returns
+  // rather than throwing once per frame forever.
   const ctx = canvas.getContext('2d');
+  if (!ctx) return;
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
 
@@ -50,21 +65,36 @@ export function drawLineChart(canvas, points) {
     return;
   }
 
-  const padL = 52, padR = 10, padT = 12, padB = 22;
   const min = Math.min(...points), max = Math.max(...points), span = max - min || 1;
   const n = points.length;
+  const line = points[n - 1] >= points[0] ? up : down;
+
+  // Labels first: the plot area cannot be laid out until it is known how much
+  // room the axis needs, and that depends on the instrument's precision.
+  ctx.font = "10px 'IBM Plex Mono', monospace";
+  const rows = 4;
+  const labels = [];
+  let widest = 0;
+  for (let r = 0; r <= rows; r++) {
+    const v = min + (span * r) / rows;
+    const text = fmtMove(v, points[n - 1]);
+    labels.push({ v, text });
+    const w = ctx.measureText(text).width;
+    if (w > widest) widest = w;
+  }
+
+  const padL = Math.min(Math.max(52, Math.ceil(widest) + 12), Math.max(24, W * 0.45));
+  const padR = 10, padT = 12, padB = 22;
   const X = (i) => padL + (i / (n - 1)) * (W - padL - padR);
   const Y = (v) => padT + (1 - (v - min) / span) * (H - padT - padB);
-  const line = points[n - 1] >= points[0] ? up : down;
 
   // gridlines + price labels
   ctx.strokeStyle = grid; ctx.fillStyle = axis; ctx.lineWidth = 1;
-  ctx.font = "10px 'IBM Plex Mono', monospace"; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  const rows = 4;
-  for (let r = 0; r <= rows; r++) {
-    const v = min + (span * r) / rows, yy = Y(v);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (const { v, text } of labels) {
+    const yy = Y(v);
     ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
-    ctx.globalAlpha = 1; ctx.fillText(v.toFixed(2), padL - 6, yy);
+    ctx.globalAlpha = 1; ctx.fillText(text, padL - 6, yy);
   }
 
   // area

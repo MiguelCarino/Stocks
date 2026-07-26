@@ -8,12 +8,22 @@
   <meta name="description" content="Detached display panel for Carino Stocks. Receives quotes from the main window; never fetches." />
   <link rel="stylesheet" href="fonts/carino-fonts.css" />
   <link rel="stylesheet" href="css/stocks.css" />
+  <!-- The panel renders the same widgets the workspace does, so it needs the same
+       stylesheet. Loaded before the block below, which re-scales that markup for
+       this medium and must therefore win on ties. -->
+  <link rel="stylesheet" href="css/workspace.css" />
   <style>
     /* Popout-only styling. It lives here rather than in css/stocks.css because a
        detached panel is a different medium from the app: no navbar, no chrome to
        speak of, and type sized to be read from across a room instead of from a
        desk. Everything scales off vmin so one stylesheet serves a 320x90 strip
-       docked to a taskbar and a 4K board filling a second monitor. */
+       docked to a taskbar and a 4K board filling a second monitor.
+
+       Since the renderers moved into widgets.js, almost everything here is a
+       RE-SCALE of markup someone else owns rather than a look of its own: the
+       classes are widgets.js's and css/workspace.css's, and the rules below only
+       change size, fill and overflow. Anything that is not one of those three
+       belongs in workspace.css, not here. */
     /* height, not min-height: the app shell grows with content, a panel never
        does — anything that does not fit is the panel's problem to clip. */
     body.po {
@@ -34,6 +44,15 @@
       font-family: var(--mono); font-size: .6rem; color: var(--text-muted);
     }
     .po-title { color: var(--text-sec); letter-spacing: .1em; text-transform: uppercase; }
+    /* A widget this build does not have was substituted for another one. It lives
+       in the bar rather than above the body because the bar is the one piece of
+       chrome the strip layout keeps, and a silent substitution is the failure both
+       this file and displays.js exist to avoid. Clipped here, whole in the title. */
+    .po-note {
+      max-width: 38ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--warn); border: 1px dashed var(--accent-dim); border-radius: 4px; padding: 2px 6px;
+    }
+    .po-note[hidden] { display: none; }
     .po-spacer { flex: 1; }
     .po-hint { white-space: nowrap; opacity: .55; }
     .chip {
@@ -71,80 +90,144 @@
       font-family: var(--mono); font-size: .78rem; color: var(--text-muted); text-align: center; padding: 12px;
     }
 
-    /* ---- board ---- */
-    /* Rows stretch to fill a dedicated monitor but are floored at min-content so
-       a crowded short window clips nothing. */
-    /* Cards size to their content and the grid packs from the top. Filling the
-       height instead (grid-auto-rows: 1fr) stretched eight cards across a whole
-       monitor and read as an empty panel. Overflow scrolls rather than clips. */
-    .board {
-      display: grid; gap: 10px; align-content: start;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      max-height: 100%; overflow-y: auto;
+    /* ---- the widget host ----
+       One element, created by popout.js and handed to createWidget(), which owns
+       everything inside it. Text is selectable in here even though the shell is
+       not: the dense table's whole reason for patching instead of rebuilding is
+       that a reader can keep a figure selected mid-thought, and a panel that
+       forbade selection would throw that away. */
+    .po-widget {
+      height: 100%; min-height: 0; min-width: 0; overflow: auto;
+      user-select: text; scrollbar-width: thin; scrollbar-color: var(--border-hi) transparent;
     }
-    .board .card { min-width: 0; }
-    .board .card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ---- shared widget pieces ----
+       .wg-pick's button reset, .wg-privacy's blur and .wt-privacy's are all
+       css/workspace.css's, which this page links above, so none of them are
+       repeated here — a second copy of a blur rule is a second thing to forget to
+       change. What follows only re-scales. */
+    .po-widget .wg-blank {
+      height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 6px; text-align: center; padding: 12px;
+    }
+    .po-widget .wg-blank-title { font-family: var(--mono); font-size: .8rem; color: var(--text-sec); }
+    .po-widget .wg-blank .field-note { max-width: 42ch; }
+    .po-widget .wg-sec { margin-top: 1vmin; }
+
+    /* ---- cards (the board panel) ----
+       Cards size to their content and the grid packs from the top. Filling the
+       height instead (grid-auto-rows: 1fr) stretched eight cards across a whole
+       monitor and read as an empty panel. */
+    .po-widget .card-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; align-content: start; }
+    .po-widget .card { min-width: 0; }
+    .po-widget .card-sym { font-family: var(--mono); font-weight: 700; font-size: clamp(.8rem, 2.1vmin, 1.1rem); }
+    .po-widget .card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* A six-figure crypto price next to its absolute change overruns a card that
        an equity fits comfortably, and a pair's counter-currency must not be
        orphaned onto its own line. Keep each value whole and wrap between them. */
-    .board .card-price-row { flex-wrap: wrap; row-gap: 2px; min-width: 0; }
-    .board .card-price { white-space: nowrap; font-size: clamp(1rem, 2.4vmin, 1.5rem); }
-    .board .card-tags { flex-wrap: wrap; row-gap: 2px; }
-    .bt {
-      background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
-      padding: 1.4vmin 1.8vmin; min-width: 0;
-      display: flex; flex-direction: column; justify-content: center; gap: .4vmin;
+    .po-widget .card-price-row { flex-wrap: wrap; row-gap: 2px; min-width: 0; }
+    .po-widget .card-price { white-space: nowrap; font-size: clamp(1rem, 2.4vmin, 1.5rem); }
+    .po-widget .card-tags { flex-wrap: wrap; row-gap: 2px; }
+
+    /* ---- quote (the ticker panel) ----
+       One symbol, as large as the window allows: this is the panel someone puts
+       on a second monitor and reads without walking over to it. */
+    body.po.widget-quote .po-widget { display: flex; overflow: hidden; }
+    .po-widget .wg-quote {
+      flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: .6vmin;
     }
-    .bt-sym {
-      font-family: var(--mono); font-weight: 700; letter-spacing: .04em;
-      font-size: clamp(.72rem, 2.1vmin, 1.1rem); color: var(--text-sec);
+    .po-widget .wg-quote-sym {
+      font-family: var(--mono); font-weight: 700; letter-spacing: .04em; color: var(--text-sec);
+      font-size: clamp(.72rem, 2.4vmin, 1.3rem);
+    }
+    .po-widget .wg-quote-name {
+      font-size: clamp(.6rem, 1.7vmin, .9rem); color: var(--text-muted);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .bt-price {
-      font-family: var(--mono); font-weight: 700; line-height: 1.05;
-      font-size: clamp(1.15rem, 5.2vmin, 3rem);
-      font-variant-numeric: tabular-nums;
+    .po-widget .wg-quote-price {
+      font-family: var(--mono); font-weight: 700; line-height: 1.02; font-variant-numeric: tabular-nums;
+      font-size: clamp(1.4rem, 8.5vmin, 5rem); white-space: nowrap;
     }
-    .bt-delta { font-size: clamp(.6rem, 1.9vmin, .95rem); align-self: flex-start; }
-    .bt.up   { border-color: rgba(34,197,94,.28); }
-    .bt.down { border-color: rgba(239,68,68,.28); }
+    .po-widget .wg-quote .delta { align-self: flex-start; font-size: clamp(.62rem, 2vmin, 1.05rem); }
+    .po-widget .wg-quote-foot {
+      display: flex; align-items: baseline; gap: 1.2vmin; flex-wrap: wrap;
+      font-family: var(--mono); font-size: clamp(.52rem, 1.5vmin, .74rem); color: var(--text-muted);
+    }
+    .po-widget .wg-quote-frame { color: var(--err); }
+    .po-widget .wg-quote-frame[hidden] { display: none; }
 
-    /* ---- ticker tape ---- */
-    .tape { height: 100%; display: flex; align-items: center; overflow: hidden; position: relative; }
-    .tape-run { display: flex; align-items: center; flex-shrink: 0; animation: tape-roll var(--dur, 60s) linear infinite; }
-    .tape:hover .tape-run { animation-play-state: paused; }
-    @keyframes tape-roll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
-    .tk {
-      display: flex; align-items: baseline; gap: .9vmin; padding: 0 1.6vmin;
-      border-right: 1px solid var(--border); white-space: nowrap;
+    /* ---- tape (the strip panel) ----
+       Clipped under a fade rather than wrapped: the strip is one line by
+       definition, and a fade says "there is more" without a scrollbar on a
+       display nobody is going to scroll. */
+    .po-widget .wg-tape {
+      display: flex; align-items: baseline; gap: 0; height: 100%;
+      overflow-x: auto; overflow-y: hidden; white-space: nowrap;
+      mask-image: linear-gradient(90deg, #000 92%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent);
     }
-    .tk-sym   { font-family: var(--mono); font-weight: 700; font-size: clamp(.85rem, 3.4vmin, 2rem); color: var(--accent); }
-    .tk-price { font-family: var(--mono); font-weight: 700; font-size: clamp(.85rem, 3.4vmin, 2rem); font-variant-numeric: tabular-nums; }
-    .tk-pct   { font-family: var(--mono); font-weight: 600; font-size: clamp(.68rem, 2.4vmin, 1.3rem); }
-    .tk-pct.up { color: var(--ok); } .tk-pct.down { color: var(--err); } .tk-pct.flat { color: var(--text-muted); }
-    @media (prefers-reduced-motion: reduce) {
-      .tape-run { animation: none; }
-      .tape { overflow-x: auto; }
-      .tape-run.dupe { display: none; }
-    }
+    .po-widget .wg-tk { display: inline-flex; align-items: baseline; gap: 6px; padding: 0 10px; border-right: 1px solid var(--border); }
+    .po-widget .wg-tk-sym { font-family: var(--mono); font-weight: 700; font-size: clamp(.66rem, 3vmin, 1rem); color: var(--text-sec); }
+    .po-widget .wg-tk-price { font-family: var(--mono); font-weight: 700; font-size: clamp(.66rem, 3vmin, 1rem); font-variant-numeric: tabular-nums; }
+    .po-widget .wg-tk-pct { font-family: var(--mono); font-size: clamp(.58rem, 2.4vmin, .88rem); }
+    .po-widget .wg-tk-pct.up { color: var(--ok); }
+    .po-widget .wg-tk-pct.down { color: var(--err); }
+    .po-widget .wg-tk-pct.flat { color: var(--text-muted); }
+    .po-widget .wg-tk-stale { color: var(--err); font-weight: 700; }
 
     /* ---- portfolio ---- */
-    .pf { height: 100%; display: flex; flex-direction: column; gap: 1.6vmin; min-height: 0; }
-    .pf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(clamp(110px, 18vmin, 200px), 1fr)); gap: 1.2vmin; }
-    .pf-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1.2vmin 1.6vmin; min-width: 0; }
-    .pf-lbl { font-family: var(--mono); font-size: clamp(.52rem, 1.5vmin, .72rem); letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
-    .pf-val { font-family: var(--mono); font-weight: 700; font-size: clamp(1rem, 4.2vmin, 2.4rem); font-variant-numeric: tabular-nums; line-height: 1.1; }
-    .pf-val.up { color: var(--ok); } .pf-val.down { color: var(--err); }
-    .pf-rows { flex: 1; min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); }
-    .pf-row { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 1.4vmin; padding: .9vmin 1.6vmin; }
-    .pf-row + .pf-row { border-top: 1px solid var(--border); }
-    .pf-row span { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: clamp(.66rem, 2vmin, 1.05rem); }
-    .pf-row .pf-sym { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pf-row .pf-day.up { color: var(--ok); } .pf-row .pf-day.down { color: var(--err); }
+    .po-widget .wg-port { height: 100%; display: flex; flex-direction: column; gap: 1.4vmin; min-height: 0; }
+    .po-widget .stat-row { margin-bottom: 0; gap: 1.2vmin; }
+    .po-widget .stat-tile { min-width: clamp(110px, 18vmin, 200px); padding: 1.2vmin 1.6vmin; }
+    .po-widget .stat-tile .st-label { font-size: clamp(.52rem, 1.5vmin, .72rem); }
+    .po-widget .stat-tile .st-value { font-size: clamp(1rem, 4.2vmin, 2.4rem); line-height: 1.1; }
+    .po-widget .table-wrap { flex: 1; min-height: 0; overflow: auto; }
+    .po-widget table.data { font-size: clamp(.62rem, 1.9vmin, 1rem); }
+    .po-widget table.data th, .po-widget table.data td { padding: .8vmin 1.2vmin; }
+    /* The header has to survive the body scrolling under it — a value column with
+       no name above it is a column of unlabelled numbers. */
+    .po-widget table.data thead th { position: sticky; top: 0; z-index: 1; }
+    .po-widget .wg-pick-sym { font-family: var(--mono); font-weight: 700; }
 
-    /* ---- strip ----
+    /* ---- chart ---- */
+    body.po.widget-chart .po-widget { display: flex; overflow: hidden; }
+    .po-widget .wg-chart { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 1vmin; }
+    .po-widget .wg-head { display: flex; align-items: baseline; gap: 1.2vmin; flex-wrap: wrap; }
+    .po-widget .wg-sym { font-family: var(--mono); font-weight: 700; font-size: clamp(.8rem, 2.4vmin, 1.2rem); color: var(--text-sec); }
+    .po-widget .wg-last { font-family: var(--mono); font-weight: 700; font-size: clamp(.9rem, 3.2vmin, 1.8rem); font-variant-numeric: tabular-nums; }
+    /* Fills the panel instead of the stylesheet's fixed 220px desk height. */
+    .po-widget .chart-wrap { flex: 1; min-height: 0; height: auto; }
+
+    /* ---- table ----
+       Structure — the fixed layout its own <colgroup> depends on, the single
+       scrolling ancestor its sticky header needs, the hidden caption — is
+       css/workspace.css's and is not repeated. This is the re-scale: mono
+       throughout and a type size that tracks the panel, since a table on a second
+       monitor is read from further away than one in a pane. */
+    .po-widget .wt-table {
+      font-family: var(--mono); font-variant-numeric: tabular-nums;
+      font-size: clamp(.58rem, 1.5vmin, .9rem);
+    }
+    .po-widget .wt-hbtn { height: auto; min-height: 22px; padding: 2px 6px; }
+
+    /* ---- session ---- */
+    .po-widget .wg-session { display: flex; flex-direction: column; gap: 1vmin; }
+    .po-widget .wg-sess-row {
+      display: flex; align-items: baseline; gap: .9vmin; flex-wrap: wrap;
+      font-family: var(--mono); font-size: clamp(.64rem, 2.1vmin, 1rem);
+    }
+    .po-widget .wg-sess-mkt { font-weight: 700; color: var(--text-sec); }
+    .po-widget .wg-sess-count { font-variant-numeric: tabular-nums; color: var(--accent); }
+    .po-widget .wg-sess-next, .po-widget .wg-sess-detail { color: var(--text-muted); }
+
+    /* ---- alerts ---- */
+    .po-widget .wg-alerts { display: flex; flex-direction: column; gap: .6vmin; }
+    .po-widget .wg-rules { display: flex; flex-direction: column; gap: 4px; }
+
+    /* ---- strip layout ----
        One line, always. The shell turns horizontal so the chrome shares the row
-       instead of stealing a second one, and the tape clips under a fade. */
+       instead of stealing a second one. Keyed off the PANEL id rather than the
+       widget kind: a strip is one line whatever someone configures it to draw. */
     body.po.panel-strip .po-shell { flex-direction: row; align-items: center; }
     body.po.panel-strip .po-body { padding: 0 0 0 10px; }
     body.po.panel-strip .po-bar { border-top: none; border-left: 1px solid var(--border); background: transparent; }
@@ -152,16 +235,9 @@
     /* One line means the alert cannot have a line of its own — for the duration
        it shows, the alert IS the line. */
     body.po.panel-strip .po-alert:not([hidden]) { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; }
-    .strip {
-      display: flex; align-items: baseline; gap: 0; height: 100%; overflow: hidden; white-space: nowrap;
-      mask-image: linear-gradient(90deg, #000 92%, transparent);
-      -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent);
-    }
-    .sp { display: flex; align-items: baseline; gap: 6px; padding: 0 10px; border-right: 1px solid var(--border); }
-    .sp-sym   { font-family: var(--mono); font-weight: 700; font-size: clamp(.66rem, 3vmin, 1rem); color: var(--text-sec); }
-    .sp-price { font-family: var(--mono); font-weight: 700; font-size: clamp(.66rem, 3vmin, 1rem); font-variant-numeric: tabular-nums; }
-    .sp-pct   { font-family: var(--mono); font-size: clamp(.58rem, 2.4vmin, .88rem); }
-    .sp-pct.up { color: var(--ok); } .sp-pct.down { color: var(--err); } .sp-pct.flat { color: var(--text-muted); }
+    /* Anything but a tape gets its vertical space back from the padding, since a
+       docked strip is only ~90px tall to begin with. */
+    body.po.panel-strip .po-widget { overflow-y: hidden; }
   </style>
 </head>
 <body class="po">
@@ -172,6 +248,7 @@
     </main>
     <footer class="po-bar">
       <span class="po-title" id="poTitle">Panel</span>
+      <span class="po-note" id="poNote" hidden></span>
       <span class="chip" id="poSession">—</span>
       <span class="chip" id="poStale" hidden></span>
       <span class="chip warn" id="poPlace" hidden>Placement ignored</span>

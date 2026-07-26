@@ -1,0 +1,460 @@
+/* workspace.css — chrome for the widget workspace: the tab strip, the 12-column
+   tiling grid, the widget frames, and the dense table.
+
+   Loaded AFTER css/stocks.css so every token there (--bg-card, --border,
+   --accent, --ok, --err, --mono …) is already in scope; nothing here redefines a
+   colour that file already names. It is a separate file for one reason: the
+   workspace is a layout system, and layout systems want to own their own
+   stacking, scrolling and overflow rules end to end. Interleaving them with the
+   card/drawer styles is how you end up with two files fighting over which
+   element is allowed to scroll.
+
+   EVERY SELECTOR BELOW IS A CLASS SOMETHING ACTUALLY EMITS. The first version of
+   this file was written in parallel with the markup and guessed the names: it
+   styled .wt-wrap and .widget-head while the code wrote .wt-scroll and
+   .wk-w-head, so the dense table — the whole point of the feature — rendered as
+   unstyled browser default in the app while looking correct in a popout, which
+   carries its own copy of the load-bearing subset. The prefixes are now fixed and
+   mean one thing each:
+     .wk-*  the workspace shell — tabs, grid, widget frame (js/workspace.js)
+     .wg-*  the inside of a widget                          (js/widgets.js)
+     .wt-*  the inside of the dense table                   (js/widget-table.js)
+   If a rule here matches nothing, delete it rather than keep it as a synonym.
+
+   The scroll contract, which the rest of the file depends on: exactly one
+   element scrolls per axis. The tab strip scrolls horizontally, each widget BODY
+   scrolls on its own, and the grid scrolls vertically. Every ancestor in that
+   chain therefore carries min-height:0 / min-width:0 — without them a grid or
+   flex child refuses to shrink below its content and the inner overflow:auto
+   silently never engages. */
+
+/* Grid geometry. --wk-row is read back by js/workspace.js to size one drag step,
+   so it must stay a FIXED length: an auto row makes every vertical drag a guess.
+   68px is not arbitrary either — it is the fallback workspace.js uses and
+   therefore the unit widgets.js sized its default heights in, so a shorter row
+   silently clips every widget that trusted them. */
+:root{
+  --wk-row:68px; --wk-gap:10px; --wk-head:32px; --wk-tab-h:34px;
+}
+
+/* ---- workspace root ----
+   The chain from body to .wk-grid must have a definite height at every step, or
+   the grid's overflow-y never engages and the page scrolls instead — taking the
+   rail and the market strip off screen with it. */
+.workspace-host{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;}
+/* The workspace replaces the padded card view, so it manages its own insets. */
+.ws-main:has(>.workspace-host){padding:0;display:flex;flex-direction:column;min-height:0;overflow:hidden;}
+
+/* ---- tab strip ----
+   Overflow scrolls rather than wraps: a second row of tabs shifts the grid down
+   and reflows every widget, which is far more disruptive than a scrollbar. */
+.wk-root{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;}
+.wk-bar{display:flex;align-items:center;gap:8px;padding:0 12px;min-height:var(--wk-tab-h);flex-shrink:0;
+  background:var(--bg-elev);border-bottom:1px solid var(--border);}
+/* scrollbar-color, not just ::-webkit-scrollbar: where the standard property is
+   supported it wins outright, and the default light track is glaring on near-black. */
+.wk-tabs{display:flex;align-items:stretch;gap:4px;flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:thin;scrollbar-color:var(--border-hi) transparent;-webkit-overflow-scrolling:touch;}
+.wk-tabs::-webkit-scrollbar{height:3px;}
+.wk-tabs::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:2px;}
+.wk-tab{display:flex;align-items:center;flex-shrink:0;max-width:220px;
+  border:1px solid transparent;border-bottom:0;border-radius:5px 5px 0 0;}
+.wk-tab.active{border-color:var(--accent-dim);background:var(--bg-card);}
+.wk-tab-btn{height:30px;padding:0 8px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  background:transparent;border:0;color:var(--text-sec);font-family:var(--mono);font-size:.68rem;
+  letter-spacing:.02em;cursor:grab;transition:color .15s,background-color .15s;}
+.wk-tab-btn:hover{color:var(--text);background:var(--accent-faint);}
+.wk-tab.active .wk-tab-btn{color:var(--accent);}
+/* Drag-reorder feedback: the dragged tab fades in place so the user sees cargo
+   and destination at once. */
+.wk-tab-btn.wk-tab-moving{opacity:.6;cursor:grabbing;}
+.wk-tab-x{width:18px;height:18px;margin-right:4px;flex-shrink:0;background:transparent;border:0;border-radius:3px;
+  color:var(--text-muted);font-size:.6rem;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s;}
+.wk-tab:hover .wk-tab-x,.wk-tab-x:focus-visible{opacity:1;}
+.wk-tab-x:hover{color:var(--err);background:rgba(239,68,68,.14);}
+.wk-tab-add{height:30px;min-width:26px;flex-shrink:0;background:transparent;border:0;color:var(--text-muted);
+  font-size:.8rem;cursor:pointer;transition:.15s;}
+.wk-tab-add:hover{color:var(--accent);background:var(--accent-faint);}
+/* Rename in place: the input inherits the tab's metrics so the row does not jump. */
+.wk-tab-edit{width:130px;height:26px;font-family:var(--mono);font-size:.68rem;padding:0 6px;}
+.wk-tab-btn:focus-visible,.wk-tab-x:focus-visible,.wk-tab-add:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+
+/* ---- add-widget picker ---- */
+.wk-picker-wrap{position:relative;flex-shrink:0;}
+.wk-picker{position:absolute;right:0;top:calc(100% + 4px);z-index:60;min-width:250px;max-height:60vh;overflow-y:auto;
+  background:var(--bg-card);border:1px solid var(--border-hi);border-radius:6px;box-shadow:0 12px 32px rgba(0,0,0,.6);padding:4px;}
+.wk-picker[hidden]{display:none;}
+.wk-pick{display:block;width:100%;padding:7px 9px;background:transparent;border:0;border-radius:4px;
+  color:inherit;text-align:left;cursor:pointer;}
+.wk-pick:hover,.wk-pick:focus-visible{background:var(--accent-faint);outline:none;}
+.wk-pick-label{display:block;font-family:var(--mono);font-weight:700;font-size:.74rem;}
+.wk-pick-desc{display:block;font-size:.66rem;color:var(--text-muted);line-height:1.45;margin-top:2px;}
+
+/* ---- 12-column tiling grid ----
+   Frames set grid-column / grid-row inline from their persisted col/row/w/h;
+   this only supplies the tracks. minmax(0,1fr) rather than 1fr so a wide table
+   inside a narrow widget scrolls instead of stretching its column. */
+.wk-grid{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;padding:var(--wk-gap);
+  scrollbar-width:thin;scrollbar-color:var(--border-hi) transparent;
+  display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:var(--wk-row);
+  gap:var(--wk-gap);align-content:start;}
+.wk-grid::-webkit-scrollbar{width:8px;}
+.wk-grid::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:4px;}
+/* Faint column guides while dragging: the snap targets should be visible before
+   you drop, not inferred afterwards. */
+.wk-grid.wk-dragging{user-select:none;cursor:grabbing;
+  background-image:repeating-linear-gradient(90deg,var(--accent-faint) 0 1px,transparent 1px);
+  background-size:calc((100% - 2*var(--wk-gap))/12) 100%;background-position:var(--wk-gap) 0;background-repeat:repeat-x;}
+.wk-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:10px;padding:48px 20px;
+  color:var(--text-muted);font-size:.78rem;}
+
+/* ---- widget frame ---- */
+.wk-w{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;
+  background:var(--bg-card);border:1px solid var(--border);border-radius:8px;transition:border-color .15s,box-shadow .15s;}
+.wk-w:hover{border-color:var(--border-hi);}
+.wk-w:focus-within{border-color:var(--accent-dim);}
+.wk-w-moving{opacity:.85;border-color:var(--accent);box-shadow:0 12px 32px rgba(0,0,0,.6);z-index:5;}
+.wk-w-sizing{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);z-index:5;}
+/* A widget that failed is a data problem, not a crash: the frame says so and
+   keeps its slot rather than leaving a hole that reads as a broken workspace. */
+.wk-w-error{border-color:rgba(239,68,68,.45);}
+.wk-w-fail{padding:12px;font-size:.72rem;color:var(--err);line-height:1.5;}
+/* A layout the browser refused to store, in the shell rather than in a toast: it
+   is a standing condition, and every drag the user makes under it will be lost. */
+.wk-savenote{flex-shrink:0;padding:5px 12px;background:var(--accent-faint);
+  border-bottom:1px solid var(--accent-dim);color:var(--accent);font-size:.66rem;}
+.wk-savenote[hidden]{display:none;}
+
+.wk-w-head{display:flex;align-items:center;gap:6px;min-height:var(--wk-head);flex-shrink:0;padding:0 6px;
+  background:var(--bg-elev);border-bottom:1px solid var(--border);cursor:grab;user-select:none;}
+.wk-w-head:active{cursor:grabbing;}
+.wk-w-grip{width:18px;flex-shrink:0;background:transparent;border:0;padding:0;
+  color:var(--text-muted);font-size:.7rem;line-height:1;cursor:grab;}
+.wk-w-grip:hover{color:var(--accent);}
+.wk-w-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--mono);font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-sec);}
+/* The linked symbol, in the header because "which symbol is this widget on" is
+   the first question a tiled layout provokes. */
+.wk-w-sym{max-width:110px;flex-shrink:0;}
+.wk-w-link{width:auto;padding:0 5px;font-family:var(--mono);font-size:.55rem;letter-spacing:.06em;text-transform:uppercase;}
+.wk-w-link.active,.wk-w-link[aria-pressed="true"]{color:var(--accent);border-color:var(--accent-dim);background:var(--accent-faint);}
+.wk-w-x:hover{border-color:var(--err);color:var(--err);background:rgba(239,68,68,.1);}
+.wk-w-head .icon-mini{width:22px;height:22px;flex-shrink:0;}
+
+.wk-w-body{flex:1;min-height:0;min-width:0;overflow:auto;padding:8px;
+  scrollbar-width:thin;scrollbar-color:var(--border-hi) transparent;}
+.wk-w-body::-webkit-scrollbar{width:8px;height:8px;}
+.wk-w-body::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:4px;}
+/* Three widgets own their own scrolling and their own edges: padding round the
+   table would come out of the row count, and a second scroller above the table's
+   would break its sticky header. */
+.wk-w[data-kind="table"] .wk-w-body{padding:0;overflow:hidden;}
+.wk-w[data-kind="tape"] .wk-w-body{padding:0;overflow:hidden;}
+.wk-w[data-kind="chart"] .wk-w-body{overflow:hidden;}
+
+/* Resize handle: ~14px is about the smallest square that is still a reliable
+   pointer target, and the chevron insets so the border radius never clips it. */
+.wk-w-size{position:absolute;right:0;bottom:0;width:14px;height:14px;padding:0;
+  background:transparent;border:0;cursor:nwse-resize;opacity:0;z-index:2;transition:opacity .15s;}
+.wk-w:hover .wk-w-size,.wk-w-size:focus-visible{opacity:1;}
+.wk-w-size::after{content:'';position:absolute;right:2px;bottom:2px;width:6px;height:6px;
+  border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);border-bottom-right-radius:2px;}
+.wk-w-grip:focus-visible,.wk-w-size:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+
+/* ---- widget internals (wg-) ------------------------------------------------
+   .wg-pick comes first on purpose. Every symbol in every widget is a real button
+   so it can be reached from a keyboard, and it has to look like text — but the
+   reset must not outrank the per-caller classes that follow it, which is exactly
+   what `all:unset` did: it wiped the card ticker's mono bold and the rule list's
+   too, in this stylesheet only, because the panel re-asserted them itself. */
+.wg-pick{background:none;border:0;padding:0;margin:0;color:inherit;font:inherit;letter-spacing:inherit;
+  text-align:inherit;cursor:pointer;}
+.wg-pick:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.wg-pick[disabled]{cursor:default;color:var(--text-muted);}
+/* The two callers whose look is defined in stocks.css, re-declared here because a
+   button inherits nothing useful and `font:inherit` above would otherwise win. */
+.wg-pick.card-sym{display:block;font-family:var(--mono);font-weight:700;font-size:1rem;color:var(--text);}
+.wg-pick.rr-sym{font-family:var(--mono);font-weight:700;font-size:.8rem;}
+.wg-pick-sym{font-family:var(--mono);font-weight:700;}
+
+/* Privacy: the widget sets this itself from ctx.privacy rather than reading a
+   body class, because a detached panel is a different document. */
+.wg-privacy .amount{filter:blur(6px);transition:filter .1s;}
+.wg-privacy .amount:hover{filter:none;}
+
+/* An unknown widget kind, or one that died mid-render. Both are honest states. */
+.wg-blank{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;height:100%;
+  padding:14px;text-align:center;}
+.wg-blank-title{font-family:var(--mono);font-size:.76rem;color:var(--text-sec);}
+.wg-blank .field-note{max-width:42ch;}
+.wg-sec{margin:6px 0 4px;}
+.wg-sec:first-child{margin-top:0;}
+
+/* cards: the grid packs from the top, because stretching eight cards over a
+   whole pane reads as an empty one. */
+.wg-card{min-width:0;}
+.wk-w[data-kind="cards"] .card-grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;align-content:start;}
+.wk-w[data-kind="cards"] .card{padding:10px;}
+.wk-w[data-kind="cards"] .card-price{font-size:1.2rem;}
+
+/* chart: .wg-chart is the widget ROOT (a header, the canvas wrap and a note),
+   so the sizing lives on the wrap and the canvas — not on this element. */
+.wg-chart{display:flex;flex-direction:column;gap:6px;height:100%;min-height:0;}
+.wg-chart .chart-wrap{flex:1;min-height:90px;height:auto;}
+.wg-chart .detail-chart{width:100%;height:100%;display:block;}
+.wg-chart .field-note{font-size:.62rem;}
+/* The chart's own header row. Not the frame header — that is .wk-w-head. */
+.wg-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;flex-shrink:0;}
+.wg-sym{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--text-sec);}
+.wg-last{font-family:var(--mono);font-weight:700;font-size:1.05rem;font-variant-numeric:tabular-nums;}
+/* The frame's own age, as opposed to one symbol's. Red and in the header, because
+   a chart of prices nothing has refreshed is the most convincing lie here. */
+.wg-frame{color:var(--err);}
+.wg-frame[hidden]{display:none;}
+
+/* quote: sized to be read from across a room, so the price is the only thing
+   here allowed to be large. */
+.wg-quote{display:flex;flex-direction:column;justify-content:center;gap:2px;height:100%;min-width:0;}
+.wg-quote-sym{font-family:var(--mono);font-weight:700;font-size:.8rem;letter-spacing:.04em;color:var(--text-sec);}
+.wg-quote-name{font-size:.66rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.wg-quote-price{font-family:var(--mono);font-weight:700;font-size:clamp(1.4rem,3.4vw,2.6rem);line-height:1.05;
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+.wg-quote .delta{align-self:flex-start;}
+.wg-quote .card-tags{margin:4px 0 0;}
+/* A flex row with a gap, or the source, volume and age run together into one
+   unreadable word. */
+.wg-quote-foot{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:4px;
+  font-family:var(--mono);font-size:.6rem;color:var(--text-muted);}
+.wg-quote-src{letter-spacing:.04em;text-transform:uppercase;}
+.wg-quote-vol{font-variant-numeric:tabular-nums;}
+.wg-quote-age{white-space:nowrap;}
+.wg-quote-frame{color:var(--err);}
+.wg-quote-frame[hidden]{display:none;}
+
+/* portfolio */
+.wg-port{display:flex;flex-direction:column;gap:10px;min-height:0;height:100%;}
+.wg-port .stat-row{margin-bottom:0;gap:8px;}
+.wg-port .stat-tile{min-width:118px;padding:6px 10px;}
+.wg-port .stat-tile .st-value{font-size:.92rem;}
+.wg-port .table-wrap{flex:1;min-height:0;overflow:auto;}
+.wg-port table.data{font-size:.72rem;}
+.wg-port table.data th,.wg-port table.data td{padding:4px 8px;}
+.wg-port table.data thead th{position:sticky;top:0;z-index:1;}
+.wg-cur-note{font-size:.64rem;}
+.wg-cur-note[hidden]{display:none;}
+/* Two separate statements, and both are red: 'nothing has refreshed' and 'one of
+   these holdings stopped printing while its market was open' are different
+   failures, and a total is only as trustworthy as the worse of them. */
+.wg-port-frame,.wg-port-stale{font-size:.64rem;color:var(--err);}
+.wg-port-frame[hidden],.wg-port-stale[hidden]{display:none;}
+
+/* tape: one line that scrolls only when the reader scrolls it. A moving target
+   is a target you miss, and in a workspace these symbols are click targets. */
+.wg-tape{display:flex;align-items:center;gap:0;height:100%;overflow-x:auto;overflow-y:hidden;white-space:nowrap;
+  scrollbar-width:thin;scrollbar-color:var(--border-hi) transparent;font-family:var(--mono);}
+.wg-tk{display:inline-flex;align-items:baseline;gap:6px;flex-shrink:0;padding:0 10px;border-right:1px solid var(--border);}
+.wg-tk-sym{font-family:var(--mono);font-weight:700;font-size:.72rem;color:var(--text-sec);}
+.wg-tk-price{font-family:var(--mono);font-weight:700;font-size:.74rem;font-variant-numeric:tabular-nums;}
+.wg-tk-pct{font-family:var(--mono);font-size:.66rem;}
+.wg-tk-pct.up{color:var(--ok);} .wg-tk-pct.down{color:var(--err);} .wg-tk-pct.flat{color:var(--text-muted);}
+.wg-tk-stale{color:var(--err);font-weight:700;}
+.wg-tk-stale[hidden]{display:none;}
+
+/* alerts */
+.wg-alerts{display:flex;flex-direction:column;gap:4px;}
+.wg-rules{display:flex;flex-direction:column;gap:5px;}
+.wg-rules .rule-row{padding:5px 8px;}
+.wg-alerts .field-note{font-size:.66rem;}
+.wg-alerts .field-note[hidden]{display:none;}
+
+/* session: one row per market on the board. Flex with a gap, because the
+   countdown, the next boundary and the frozen note are three separate facts and
+   ran together into one sentence without it. */
+.wg-session{display:flex;flex-direction:column;gap:6px;}
+.wg-sess-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:.7rem;}
+.wg-sess-mkt{font-weight:700;color:var(--text-sec);}
+.wg-sess-count{font-variant-numeric:tabular-nums;color:var(--accent);}
+.wg-sess-next{color:var(--text-sec);}
+.wg-sess-detail{color:var(--text-muted);}
+
+/* ---- the dense table (wt-) ----
+   The point of the whole feature: as many rows as the pane can honestly hold.
+   Density comes from line-height and padding, not from a smaller font — shrink
+   the glyphs and the numbers stop being scannable, which defeats the purpose.
+   Numeric cells are mono + tabular-nums so digits form vertical columns and a
+   price that moved is visible as a shape change before it is read. */
+.wt-root{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0;}
+/* The one scroller in the pane, on both axes: the sticky header sticks to this
+   box, so anything above it that also scrolled would take the header with it. */
+.wt-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;
+  scrollbar-width:thin;scrollbar-color:var(--border-hi) transparent;}
+.wt-scroll::-webkit-scrollbar{width:9px;height:9px;}
+.wt-scroll::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:4px;}
+/* fixed + max-content is what makes the widget's own <colgroup> ch widths hold:
+   with table-layout:auto the browser re-measures from content and every column
+   drifts, and without max-content the table cannot be wider than the pane and so
+   never scrolls sideways. */
+.wt-table{table-layout:fixed;width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;
+  font-size:.74rem;}
+/* The caption is for a screen reader; on screen it would be a stray sentence
+   above the header row. */
+.wt-cap{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;}
+
+.wt-h{position:sticky;top:0;z-index:2;padding:0;background:var(--bg-elev);text-align:left;
+  box-shadow:inset 0 -1px 0 var(--border-hi);
+  font-family:var(--mono);font-size:.56rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--text-muted);white-space:nowrap;}
+/* The sort control is a real button filling the cell, so the whole header is
+   clickable without inventing a click target out of a <th>. */
+.wt-hbtn{display:flex;align-items:center;gap:3px;width:100%;height:22px;padding:0 6px;background:transparent;
+  border:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;transition:.15s;}
+.wt-hbtn:hover{color:var(--accent);background:var(--accent-faint);}
+.wt-hbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.wt-h.wt-num .wt-hbtn{justify-content:flex-end;}
+.wt-hlbl{overflow:hidden;text-overflow:ellipsis;}
+/* The arrow's text is written from aria-sort's own source, so the accessible
+   state and the visible state cannot drift. */
+.wt-harrow{flex-shrink:0;font-size:.5rem;line-height:1;}
+.wt-h.wt-sorted,.wt-h.wt-sorted .wt-hbtn{color:var(--accent);}
+
+.wt-c{padding:2px 6px;border-bottom:1px solid var(--border);line-height:1.5;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;color:var(--text-sec);}
+/* .wt-num is on the header cells too, so the body rule is scoped to .wt-c: an
+   unscoped one made every numeric COLUMN HEADING brighter than the text ones. */
+.wt-h.wt-num{text-align:right;}
+.wt-c.wt-num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--text);}
+.wt-c-symbol{font-family:var(--mono);font-weight:700;color:var(--text);}
+.wt-rowbtn{background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;}
+.wt-rowbtn:hover{color:var(--accent);}
+.wt-rowbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+.wt-c-name,.wt-c-sector,.wt-c-exchange{color:var(--text-muted);}
+.wt-c-last{font-weight:700;}
+/* Direction, at the same specificity as the numeric cell rule and after it, so a
+   move that has a sign is coloured rather than left the colour of a plain figure. */
+.wt-c.wt-up{color:var(--ok);} .wt-c.wt-down{color:var(--err);} .wt-c.wt-flat{color:var(--text-muted);}
+/* A figure with a caveat the reader should see before acting on it: a change with
+   no stated baseline, or a timestamp that has stopped advancing. Amber, because
+   it is neither a gain nor a loss. */
+.wt-c.wt-warn{color:var(--warn);}
+/* Rule-derived, unconfirmed by the holiday table. Dashed, as everywhere else. */
+.wt-approx{text-decoration:underline dashed var(--accent-dim);text-underline-offset:2px;}
+
+/* Day range: a bar rather than two numbers, because "where in today's range" is
+   a position and reads faster as one. */
+.wt-range{display:flex;align-items:center;gap:4px;}
+.wt-rtrack{position:relative;flex:1;min-width:20px;height:4px;background:var(--border);border-radius:2px;}
+.wt-rmark{position:absolute;top:-2px;width:2px;height:8px;background:var(--accent);border-radius:1px;
+  box-shadow:0 0 5px var(--accent-glow);}
+.wt-rpct{font-family:var(--mono);font-size:.6rem;color:var(--text-muted);min-width:3.6ch;text-align:right;}
+/* No high/low reported is not a range of zero: the track dims and the marker is
+   removed rather than pinned to an edge. */
+.wt-range.wt-empty .wt-rtrack{opacity:.3;}
+.wt-range.wt-empty .wt-rmark{display:none;}
+
+/* Row states. Three of them can be true of one row at once, so each is written at
+   the same specificity as the hover rule and in increasing order of what the
+   reader needs to see: hover, then frozen, then uncovered, then the selection.
+   A bare .wt-sel would lose to `tr:hover>*` and the linked row would stop being
+   visible the moment the pointer crossed another one. */
+.wt-table tbody tr{transition:background-color .12s;}
+.wt-table tbody tr:hover>*{background:var(--accent-faint);}
+/* Frozen: this quote's own timestamp has stopped advancing while its market can
+   print. Dimmed AND railed — a frozen row that looked identical to a live one
+   would be the single most misleading thing this table could do, and a dim on its
+   own could be read as a styling choice. The As-of cell also carries .wt-warn and
+   a tooltip saying how long it has been frozen. */
+.wt-table tbody tr.wt-frozen>*{opacity:.66;}
+.wt-table tbody tr.wt-frozen>:first-child{box-shadow:inset 3px 0 0 var(--err);}
+.wt-table tbody tr.wt-frozen .wt-c-last{color:var(--text-sec);}
+/* Uncovered means the provider returned nothing — not a loss, not a gain, so it
+   must not borrow either colour. */
+.wt-table tbody tr.wt-uncov>*{background:rgba(245,158,11,.06);color:var(--text-muted);}
+.wt-table tbody tr.wt-uncov .wt-c.wt-num{color:var(--text-muted);font-style:italic;}
+/* Background and rail only: a selection that also set a colour would take the red
+   and green off the moves in the one row the reader is looking at hardest. */
+.wt-table tbody tr.wt-sel>*{background:var(--accent-glow);}
+.wt-table tbody tr.wt-sel>:first-child{box-shadow:inset 3px 0 0 var(--accent);}
+.wt-table tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.wt-emptyrow>*{border-bottom:none;}
+.wt-emptycell{padding:22px 12px;text-align:center;color:var(--text-muted);font-size:.74rem;}
+
+/* Toolbar: the row count, the frame's age, and the column chooser. */
+.wt-bar{display:flex;align-items:center;gap:8px;flex-shrink:0;padding:3px 6px;
+  border-bottom:1px solid var(--border);background:var(--bg-elev);
+  font-family:var(--mono);font-size:.58rem;color:var(--text-muted);}
+.wt-count{white-space:nowrap;}
+/* The whole board is this far behind. Red, and not hidden behind a tooltip. */
+.wt-frame{color:var(--err);border:1px solid rgba(239,68,68,.45);border-radius:4px;padding:1px 5px;white-space:nowrap;}
+.wt-frame[hidden]{display:none;}
+/* The whole frame is old, so the whole table fades — as opacity rather than as a
+   colour, because recolouring the cells would take the red and green off the
+   moves and a stale board still needs to show which way things went. */
+.wt-stalef .wt-scroll{opacity:.72;}
+
+.wt-cols{position:relative;margin-left:auto;flex-shrink:0;}
+/* display + list-style together are what remove the disclosure triangle in every
+   engine; the summary is styled as its own chip instead. It stays a <summary>, so
+   keyboard open/close and the expanded state come free. */
+.wt-colsum{display:inline-block;list-style:none;cursor:pointer;padding:2px 6px;border:1px solid var(--border);
+  border-radius:4px;color:var(--text-muted);white-space:nowrap;}
+.wt-colsum::-webkit-details-marker{display:none;}
+.wt-colsum:hover{color:var(--accent);border-color:var(--accent-dim);}
+.wt-colsum:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+.wt-cols[open] .wt-colsum{color:var(--accent);border-color:var(--accent-dim);}
+/* Absolute, or opening the chooser pushes the table down by its own height. */
+.wt-colmenu{position:absolute;right:0;top:calc(100% + 4px);z-index:20;min-width:190px;max-height:280px;overflow-y:auto;
+  padding:7px 8px;background:var(--bg-card);border:1px solid var(--border-hi);border-radius:6px;
+  box-shadow:0 12px 32px rgba(0,0,0,.65);}
+.wt-collist{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;}
+.wt-colrow{display:flex;align-items:center;gap:5px;cursor:pointer;font-size:.64rem;color:var(--text-sec);white-space:nowrap;}
+.wt-colrow:hover{color:var(--text);}
+.wt-collbl{overflow:hidden;text-overflow:ellipsis;}
+.wt-colreset{margin-top:7px;width:100%;height:24px;background:transparent;border:1px solid var(--border);
+  border-radius:4px;color:var(--text-sec);font-family:var(--mono);font-size:.62rem;cursor:pointer;}
+.wt-colreset:hover{border-color:var(--accent);color:var(--accent);}
+/* The table sets this on its own root instead of inheriting the body class, for
+   the same reason every widget does: a panel is a different document. */
+.wt-privacy .amount{filter:blur(6px);transition:filter .1s;}
+.wt-privacy .amount:hover{filter:none;}
+
+/* ---- responsive ----
+   Below 900px the 12-column grid collapses to one column at natural height, and
+   the page scrolls again rather than the grid. A tiling grid needs a pointer and
+   room to aim; on a phone it has neither, so the drag and resize affordances are
+   removed rather than left to fail silently — a drag against a collapsed grid
+   moves nothing on screen and still persists the new geometry, which the user
+   then finds waiting for them on a desktop.
+   This is only the visible half. The header itself still accepts a pointerdown,
+   so workspace.js has to refuse the gesture when getComputedStyle(grid).display
+   is not 'grid'; until it does, a deliberate press-and-drag on a phone can still
+   write geometry that only shows up on a desktop. */
+@media(max-width:900px){
+  /* Both halves of the override live here, in this order, on purpose: a media
+     query carries no extra specificity, so the same rule sitting in the earlier
+     stylesheet could never win. That is what kept the desktop overflow:hidden in
+     force on a phone and left the page unable to scroll to its own footer. */
+  .ws-main:has(>.workspace-host){overflow:visible;}
+  .wk-grid{display:flex;flex-direction:column;overflow:visible;padding:10px;background-image:none;}
+  .wk-w{min-height:200px;max-height:70vh;}
+  .wk-w-head{cursor:default;}
+  .wk-w-size{display:none;}
+  .wk-tab{max-width:150px;}
+  .wt-c-name{display:none;}
+}
+@media(max-width:560px){
+  .wk-bar{padding:0 6px;}
+  .wt-c{padding:3px 5px;}
+  .wt-collist{grid-template-columns:1fr;}
+}
+
+/* Coarse pointers get no drag handle either — the same reasoning as above, but
+   it also catches a touch laptop at desktop width. */
+@media(hover:none) and (pointer:coarse){
+  .wk-w-size{display:none;}
+  .wk-w-head,.wk-w-grip{cursor:default;}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .wk-tab-btn,.wk-w,.wk-w-size,.wk-tab-x,.wk-tab-add,.wt-hbtn,.wt-table tbody tr{transition:none;}
+}

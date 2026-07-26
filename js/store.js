@@ -17,6 +17,7 @@ const K = {
   series: 'stk_series',
   alertlog: 'stk_alertlog',
   popouts: 'stk_popouts',
+  workspaces: 'stk_workspaces',
   schema: 'stk_schema',
   lastframe: 'stk_lastframe',   // written by peers.js only; listed so it is swept and measured here
 };
@@ -52,7 +53,11 @@ export const SCHEMA_VERSION = 2;
 // is frozen while it is active. Settings stay writable on purpose: a visitor who
 // arrives by link and pastes an API key to make that link render must not have it
 // silently discarded.
-const HASH_FROZEN = new Set([K.watchlist, K.rules, K.holdings, K.alertlog, K.profiles, K.series]);
+// The workspace layout is frozen too, for the same reason the watchlist is: a
+// shared view is someone else's symbols, and dragging a widget around while
+// looking at it must not quietly rewrite the arrangement you will come back to.
+// exitHash() puts the pre-link layout back in memory as well as on disk.
+const HASH_FROZEN = new Set([K.watchlist, K.rules, K.holdings, K.alertlog, K.profiles, K.series, K.workspaces]);
 
 // The market strip fetches these whatever the watchlist says, so eviction must
 // not treat them as orphans.
@@ -61,6 +66,28 @@ const PINNED_SYMBOLS = ['SPY', 'QQQ', 'DIA'];
 const SERIES_TTL_MS = 3 * 24 * 3600 * 1000;  // survives a weekend gap so Monday still paints a sparkline
 const PROFILE_CAP = 200;
 const HASH_SYMBOL_CAP = 60;                  // a link is not a licence to open 5,000 subscriptions
+
+/* ---- workspace bounds ------------------------------------------------------
+   The grid geometry is restated here rather than imported. store.js is pulled in
+   by every module on the boot path, and reaching into the widget registry for a
+   column count would drag the whole render layer in with it — for two integers
+   that are frozen by the layout contract anyway. If workspace.js ever moves off
+   a twelve-column grid, these two constants move with it.
+
+   The caps exist because stk_workspaces is as hand-editable as the export file:
+   a row index of 1e9 is a grid the browser tries to build, and a tab holding
+   200,000 widgets is a boot that never finishes. They are set high enough that
+   no real layout can reach them, so truncation is a defence, never a feature. */
+const WS_COLS = 12;
+const WS_MAX_ROW = 200;
+const WS_MAX_TABS = 40;
+const WS_MAX_WIDGETS = 120;                  // per tab
+const WS_NAME_MAX = 40;
+const WS_STATE_MAX = 4000;                   // JSON chars of one widget's own saved state
+
+// The kinds widgets.js ships today. Exported for callers that want to offer a
+// choice; deliberately NOT used to filter stored layouts — see validWidget().
+export const WIDGET_KINDS = ['table', 'cards', 'chart', 'quote', 'portfolio', 'tape', 'alerts', 'session'];
 
 let quotaHit = false;          // sticky for the session: one silent failure is the whole bug
 let lastError = null;
@@ -122,6 +149,11 @@ export const store = {
   // displays.js owns the sub-keys inside this object and normalizes them itself;
   // it must be a plain object, never null and never an array.
   popouts: asObject(lsGet(K.popouts, {})),
+  // The tab + widget layout, validated on the way in. null means "nothing usable
+  // stored", which is the signal ensureWorkspaces() acts on: the default layout is
+  // built from widget metadata that only workspace.js and widgets.js can see, so
+  // store.js holds the bytes and lets the caller supply the shape.
+  workspaces: shapeWorkspaces(lsGet(K.workspaces, null)),
 
   saveSettings() { return lsSet(K.settings, this.settings); },
   saveWatchlist() { return lsSet(K.watchlist, this.watchlist); },
@@ -131,6 +163,17 @@ export const store = {
   saveSeries() { return lsSet(K.series, this.series); },
   saveAlertlog() { return lsSet(K.alertlog, this.alertlog.slice(-100)); },
   savePopouts() { return lsSet(K.popouts, this.popouts); },
+
+  // Shaped on the way out as well as in. workspace.js edits the live object in
+  // place during a drag, so this is the only place the bytes are checked before
+  // they land; a model that has become unrecognisable is refused rather than
+  // written, which leaves the last good layout on disk instead of replacing it
+  // with the thing that broke.
+  saveWorkspaces() {
+    const shaped = shapeWorkspaces(this.workspaces);
+    if (!shaped) return false;
+    return lsSet(K.workspaces, shaped);
+  },
 
   /* ---- shared-link (hash) mode --------------------------------------------
      A #AAPL,MSFT link is an EPHEMERAL read-only view. hashActive freezes every
@@ -159,6 +202,11 @@ export const store = {
         rules: clone(this.rules, []),
         holdings: clone(this.holdings, []),
         alertlog: clone(this.alertlog, []),
+        // Snapshotted before workspace.js has run, so this is what is on disk.
+        // wsPersisted distinguishes "the user has a saved layout" from "the
+        // default was seeded during this link view and has never been written".
+        wsPersisted: !!this.workspaces,
+        workspaces: clone(this.workspaces, null),
       };
       this.watchlist = seed;
       this.hashActive = true;
@@ -175,6 +223,9 @@ export const store = {
     hashSnapshot = null;
     this.saveWatchlist(); this.saveRules(); this.saveHoldings();
     this.saveAlertlog(); this.saveProfiles(); this.saveSeries();
+    // Not the sharer's layout — the link carries symbols only — but the one this
+    // browser was refused permission to write while the link was open.
+    this.saveWorkspaces();
     stripHash();
     return true;
   },
@@ -192,6 +243,11 @@ export const store = {
       this.holdings = snap.holdings;
       this.alertlog = snap.alertlog;
       if (!snap.persisted) this.saveWatchlist();
+      // Any dragging done under the link was never written; put the saved layout
+      // back in memory too, so the two agree without a reload. If there was no
+      // saved layout, whatever was seeded during the view becomes the real one.
+      if (snap.workspaces) adoptWorkspaces(snap.workspaces);
+      if (!snap.wsPersisted) this.saveWorkspaces();
     }
     stripHash();
     return true;
@@ -238,6 +294,26 @@ export const store = {
   removeRule(id) { this.rules = this.rules.filter((r) => r.id !== id); this.saveRules(); },
 
   logAlert(entry) { this.alertlog.push(entry); this.saveAlertlog(); },
+
+  /* ---- workspaces ----------------------------------------------------------
+     Seed once, then get out of the way. The whole call is wrapped because the
+     factory is foreign code running on the boot path: a layout that cannot be
+     built is a missing feature, whereas a throw here is a blank application.
+     Idempotent by construction — a non-null workspaces is left exactly alone, so
+     calling this on a second init() cannot displace what the user is editing. */
+  ensureWorkspaces(defaultFactory) {
+    try {
+      if (this.workspaces) return this.workspaces;
+      const seed = typeof defaultFactory === 'function' ? shapeWorkspaces(defaultFactory()) : null;
+      if (!seed) return null;
+      this.workspaces = seed;
+      // Under a shared link this write is refused (see HASH_FROZEN) and the
+      // default lives in memory only, which is the correct outcome: the layout
+      // becomes real when the visitor adopts or dismisses the link.
+      this.saveWorkspaces();
+      return this.workspaces;
+    } catch (e) { return this.workspaces || null; }
+  },
 
   /* ---- caches -------------------------------------------------------------- */
 
@@ -290,7 +366,7 @@ export const store = {
   /* ---- import / export ----------------------------------------------------- */
 
   exportState() {
-    return JSON.stringify({
+    const out = {
       _app: 'carino-stocks', _v: SCHEMA_VERSION, exported: new Date().toISOString(),
       watchlist: Array.isArray(this.watchlist) ? this.watchlist : [],
       // Runtime latch bookkeeping (_latched, cooldownUntil) must not travel: a
@@ -299,7 +375,14 @@ export const store = {
       holdings: this.holdings.map(stripRuntime),
       alertlog: this.alertlog.slice(-100),
       settings: redactKeys(this.settings),
-    }, null, 2);
+    };
+    // The layout travels with the settings — it is the thing a user most wants to
+    // carry to a second machine. shapeWorkspaces has already reduced each widget
+    // to its persisted fields, so there is no runtime bookkeeping left to strip.
+    // Omitted entirely when there is none, rather than exporting a null.
+    const ws = shapeWorkspaces(this.workspaces);
+    if (ws) out.workspaces = ws;
+    return JSON.stringify(out, null, 2);
   },
 
   // Malformed entries are dropped, never thrown on — a half-usable backup beats a
@@ -310,8 +393,8 @@ export const store = {
     if (!d || d._app !== 'carino-stocks') throw new Error('Not a Carino Stocks export file.');
     if (this.hashActive) this.exitHash();   // importing is a deliberate write; leave the link view first
 
-    const dropped = { rules: 0, holdings: 0, alertlog: 0 };
-    const result = { watchlist: 0, rules: 0, holdings: 0, alertlog: 0, dropped };
+    const dropped = { rules: 0, holdings: 0, alertlog: 0, workspaces: 0 };
+    const result = { watchlist: 0, rules: 0, holdings: 0, alertlog: 0, workspaces: 0, dropped };
 
     if (Array.isArray(d.watchlist)) {
       this.watchlist = [...new Set(d.watchlist.map(normalizeSymbol).filter(Boolean))];
@@ -347,6 +430,19 @@ export const store = {
       this.alertlog = this.alertlog.slice(-100);
       this.saveAlertlog();
       result.alertlog = this.alertlog.length;
+    }
+    // A file with no workspaces key leaves the local layout alone: an export made
+    // before this feature existed must not blank the tabs of the machine it is
+    // imported into.
+    if (d.workspaces && typeof d.workspaces === 'object') {
+      const drops = { n: 0 };
+      const ws = shapeWorkspaces(d.workspaces, drops);
+      dropped.workspaces = drops.n;
+      if (ws) {
+        adoptWorkspaces(ws);
+        this.saveWorkspaces();
+        result.workspaces = ws.tabs.length;
+      }
     }
     if (d.settings && typeof d.settings === 'object') {
       // Keys are never in the export; keep whatever is already configured locally.
@@ -513,12 +609,126 @@ function validLogEntry(raw) {
   return out;
 }
 
+/* ---- workspace validation ---------------------------------------------------
+   stk_workspaces is written by a drag gesture, edited by hand in devtools, and
+   carried in an import file, so it gets the same treatment as an imported rule:
+   coerced field by field, malformed entries dropped, nothing thrown. The stakes
+   are higher than for a rule, though, because this is the shape the first paint
+   is built from — a throw in here is a blank application, not a missing row.
+
+   One thing is deliberately NOT validated: the widget kind is checked for the
+   shape of an identifier but not for membership of WIDGET_KINDS. A layout written
+   by a later build has to survive a round trip through this one, and widgets.js
+   already promises an honest "Unknown widget" placeholder for a kind it does not
+   recognise. Dropping the widget instead would silently delete part of a layout
+   that the newer build could still open. */
+
+function gridInt(v, lo, hi) {
+  const usable = typeof v === 'number' || (typeof v === 'string' && v.trim());
+  const n = usable ? Math.floor(Number(v)) : NaN;
+  // Absent or unusable geometry is left absent rather than invented here: store.js
+  // does not know a widget's natural size, and workspace.js substitutes the
+  // registry default for a missing number.
+  if (!Number.isFinite(n)) return null;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+// A widget's own saved state — the table's column set and sort order — is opaque:
+// the widget canonicalizes it on the way in, and store.js has no business knowing
+// what a column id is. Its size is store.js's business, since this is the one
+// field a widget can grow without bound. Round-tripping through JSON also drops
+// anything unserializable.
+function widgetState(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  try {
+    const json = JSON.stringify(v);
+    if (!json || json.length > WS_STATE_MAX) return null;
+    return JSON.parse(json);
+  } catch (e) { return null; }
+}
+
+function validWidget(raw, seen) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const kind = String(raw.kind == null ? '' : raw.kind).trim().toLowerCase();
+  if (!/^[a-z][a-z0-9-]{0,23}$/.test(kind)) return null;
+
+  const out = {
+    id: takeId(raw.id, 'w', seen),
+    kind,
+    symbol: raw.symbol ? (normalizeSymbol(raw.symbol) || null) : null,
+    // Absent flag: a widget pinned to a symbol meant to keep it, anything else
+    // meant to follow the workspace. Matches workspace.js's own reading.
+    linked: typeof raw.linked === 'boolean' ? raw.linked : !raw.symbol,
+  };
+  const w = gridInt(raw.w, 1, WS_COLS);
+  if (w != null) out.w = w;
+  const h = gridInt(raw.h, 1, WS_MAX_ROW);
+  if (h != null) out.h = h;
+  const col = gridInt(raw.col, 1, WS_COLS - ((w || 1) - 1));
+  if (col != null) out.col = col;
+  const row = gridInt(raw.row, 1, WS_MAX_ROW);
+  if (row != null) out.row = row;
+  const state = widgetState(raw.state);
+  if (state) out.state = state;
+  return out;
+}
+
+// Returns the persisted shape, or null when there is nothing usable in it at all
+// — which is the caller's cue to seed the default rather than show empty tabs.
+// `drops` is an optional { n } counter so the import can report what it skipped.
+function shapeWorkspaces(raw, drops) {
+  const bump = () => { if (drops) drops.n = (drops.n || 0) + 1; };
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.tabs)) return null;
+  const seenT = new Set(), seenW = new Set();
+  const tabs = [];
+  for (const t of raw.tabs) {
+    if (!t || typeof t !== 'object' || tabs.length >= WS_MAX_TABS) { bump(); continue; }
+    const widgets = [];
+    for (const w of Array.isArray(t.widgets) ? t.widgets : []) {
+      if (widgets.length >= WS_MAX_WIDGETS) { bump(); continue; }
+      const item = validWidget(w, seenW);
+      if (item) widgets.push(item); else bump();
+    }
+    // An empty tab is legal — the user may be about to fill it.
+    const name = (typeof t.name === 'string' && t.name.trim()) ? t.name.trim().slice(0, WS_NAME_MAX) : 'Tab';
+    tabs.push({ id: takeId(t.id, 't', seenT), name, widgets });
+  }
+  if (!tabs.length) return null;
+  const activeTab = tabs.some((t) => t.id === raw.activeTab) ? raw.activeTab : tabs[0].id;
+  return { v: 1, activeTab, tabs };
+}
+
+// workspace.js holds a reference to store.workspaces and edits it in place, so
+// replacing the object on import or on leaving a shared link would leave the
+// running workspace editing an orphan while the store held the new layout.
+function adoptWorkspaces(shape) {
+  const live = store.workspaces;
+  if (live && typeof live === 'object' && !Array.isArray(live)) {
+    live.v = 1;
+    live.activeTab = shape.activeTab;
+    live.tabs = shape.tabs;
+  } else {
+    store.workspaces = shape;
+  }
+}
+
 function referencedSymbols() {
   const keep = new Set(PINNED_SYMBOLS);
   const add = (s) => { const n = normalizeSymbol(s); if (n) keep.add(n); };
   if (Array.isArray(store.watchlist)) for (const s of store.watchlist) add(s);
   for (const h of store.holdings) if (h) add(h.symbol);
   for (const r of store.rules) if (r) add(r.symbol);
+  // A widget can be pinned to a symbol that is not on the watchlist — that is the
+  // entire point of pinning one — so its cached profile and series are in use even
+  // though nothing else in the store mentions it. Read defensively: this runs on
+  // boot, before workspace.js has had a chance to normalize anything.
+  const ws = store.workspaces;
+  if (ws && Array.isArray(ws.tabs)) {
+    for (const t of ws.tabs) {
+      if (!t || !Array.isArray(t.widgets)) continue;
+      for (const w of t.widgets) if (w) add(w.symbol);
+    }
+  }
   return keep;
 }
 

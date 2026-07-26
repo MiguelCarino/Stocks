@@ -12,6 +12,9 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="fonts/carino-fonts.css" />
   <link rel="stylesheet" href="css/stocks.css" />
+  <!-- After stocks.css, deliberately: the workspace owns its own scrolling and
+       stacking rules and must be able to override the card-view ones. -->
+  <link rel="stylesheet" href="css/workspace.css" />
 </head>
 <body>
   <!-- App controls; carino-navbar.js relocates this into the shared navbar. -->
@@ -27,10 +30,13 @@
         <option value="30">30s</option><option value="60">60s</option>
       </select>
       <button class="cs-btn" id="btnAdd" title="Add ticker">＋</button>
-      <div class="seg" role="group" aria-label="View">
-        <button class="cs-btn seg-btn active" id="viewWatch">Watchlist</button>
-        <button class="cs-btn seg-btn" id="viewPort">Portfolio</button>
+      <!-- Shortcuts to the tab that shows each thing, not a second navigation:
+           the workspace tabs own what is on screen. -->
+      <div class="seg" role="group" aria-label="Jump to workspace tab">
+        <button class="cs-btn seg-btn active" id="viewWatch" title="Show a tab with the watchlist">Watchlist</button>
+        <button class="cs-btn seg-btn" id="viewPort" title="Show a tab with the portfolio">Portfolio</button>
       </div>
+      <button class="cs-btn" id="btnHoldings" title="Holdings — add or edit">💼</button>
       <button class="cs-btn" id="btnPrivacy" title="Blur amounts">👁</button>
       <button class="cs-btn" id="btnAlerts" title="Alert rules">🔔</button>
       <button class="cs-btn" id="btnDisplays" title="Detached displays">⧉</button>
@@ -74,13 +80,22 @@
       </div>
       <div class="rail-sort">
         <span class="rail-lbl">Watchlist</span>
-        <select class="cs-select sm" id="sortSel" title="Sort">
+        <!-- One order for the whole workspace: every widget is handed the symbols
+             in this order. The table can still sort its own columns on top. -->
+        <select class="cs-select sm" id="sortSel" title="Symbol order for every widget">
           <option value="added">Recent</option>
           <option value="change">Change %</option>
           <option value="alpha">A–Z</option>
         </select>
       </div>
       <div class="rail-list" id="railList"></div>
+      <!-- First run: the workspace widgets can only say the list is empty, not
+           offer to fill it, so the offer lives beside the list itself. -->
+      <div class="rail-empty" id="railEmpty" hidden>
+        <p>Your watchlist is empty.</p>
+        <button class="btn-primary sm" id="emptyAdd">Add a ticker</button>
+        <button class="cs-btn" id="emptyDemo">Load demo watchlist</button>
+      </div>
       <div class="rail-foot">
         <div class="quota" id="quotaBox" hidden>
           <span class="rail-lbl">API credits</span>
@@ -93,36 +108,11 @@
     </aside>
 
     <!-- Main -->
+    <!-- The workspace owns everything inside #main: tabs, the tiling grid and the
+         widgets. There is no second card grid or portfolio table here, because
+         two of either means one of them is quietly wrong. -->
     <main class="ws-main" id="main">
-      <section id="watchView">
-        <div class="card-grid" id="cardGrid"></div>
-        <div class="empty-state" id="emptyState" hidden>
-          <div class="empty-icon">📈</div>
-          <p>Your watchlist is empty.</p>
-          <div class="empty-actions">
-            <button class="btn-primary" id="emptyAdd">Add a ticker</button>
-            <button class="cs-btn" id="emptyDemo">Load demo watchlist</button>
-          </div>
-        </div>
-      </section>
-
-      <section id="portView" hidden>
-        <div class="stat-row" id="portStats"></div>
-        <!-- Only shown when holdings span more than one currency: the totals are
-             a plain sum and must say so rather than pick a symbol. -->
-        <p class="field-note warn-note" id="portCurNote" hidden></p>
-        <div class="table-wrap">
-          <table class="data" id="portTable">
-            <thead><tr>
-              <th>Symbol</th><th class="num">Shares</th><th class="num">Avg Cost</th>
-              <th class="num">Last</th><th class="num">Mkt Value</th><th class="num">Day</th>
-              <th class="num">Total P/L</th><th class="num">Weight</th><th></th>
-            </tr></thead>
-            <tbody id="portBody"></tbody>
-          </table>
-        </div>
-        <button class="btn-primary" id="addHolding">＋ Add holding</button>
-      </section>
+      <div class="workspace-host" id="wsHost"></div>
     </main>
   </div>
 
@@ -280,6 +270,33 @@
           <button class="cs-btn" id="btnLogCsv" title="Download the alert log as CSV">CSV</button>
         </div>
         <div class="alert-log" id="alertLog"></div>
+      </div>
+    </div>
+
+    <!-- Holdings list. The Portfolio widget reports the numbers; widgets are
+         readers and may not write to storage, so adding, editing and deleting a
+         holding happens here. -->
+    <div class="modal" id="holdingsModal" hidden>
+      <div class="modal-head"><div class="modal-title">Holdings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <p class="field-note">Positions you enter by hand. Nothing here is connected to a brokerage — Stocks cannot see
+          your account and cannot place a trade.</p>
+        <!-- Only shown when holdings span more than one currency: the totals are
+             a plain sum and must say so rather than pick a symbol. -->
+        <p class="field-note warn-note" id="holdCurNote" hidden></p>
+        <div class="table-wrap">
+          <table class="data" id="holdTable">
+            <thead><tr>
+              <th>Symbol</th><th class="num">Shares</th><th class="num">Avg Cost</th>
+              <th class="num">Last</th><th class="num">Mkt Value</th><th></th>
+            </tr></thead>
+            <tbody id="holdBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <span class="spacer"></span>
+        <button class="btn-primary" id="addHolding">＋ Add holding</button>
       </div>
     </div>
 

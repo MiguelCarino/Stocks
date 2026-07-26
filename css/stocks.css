@@ -301,8 +301,40 @@ body.privacy-on .amount:hover{filter:none;}
 .quota-txt{font-family:var(--mono);font-size:.58rem;color:var(--text-muted);}
 .quota-sub{opacity:.75;}
 
+/* ---- rail rows (workspace era) ----
+   The row is a button now: it is the keyboard route into the board, and the ✕
+   beside it is the only place a symbol can be removed once the card grid became a
+   widget (widgets are readers and may not write the watchlist). */
+.rail-row{grid-template-columns:1fr auto;gap:4px;padding:0 4px 0 0;cursor:default;}
+.rail-row.active{background:var(--accent-faint);box-shadow:inset 2px 0 0 var(--accent);}
+.rail-row.active .rr-sym{color:var(--accent);}
+.rr-btn{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;width:100%;min-width:0;
+  padding:7px 8px;background:transparent;border:0;border-radius:5px;color:inherit;font:inherit;text-align:left;cursor:pointer;}
+.rr-btn:hover{color:var(--accent);}
+.rr-btn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.rr-x{opacity:0;flex-shrink:0;}
+.rail-row:hover .rr-x,.rr-x:focus-visible{opacity:1;}
+.rail-empty{padding:10px 14px 14px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;}
+.rail-empty[hidden]{display:none;}
+.rail-empty p{font-size:.72rem;color:var(--text-muted);}
+
+/* ---- drawer alert shortcut ---- */
+.cs-btn.sm{height:26px;padding:0 8px;font-size:.66rem;}
+.ds-alert{flex-shrink:0;}
+
+/* ---- workspace shell ----
+   Deliberately absent. Everything the workspace draws — the tab strip, the
+   12-column grid, the widget frames (.wk-*), the widget internals (.wg-*) and the
+   dense table (.wt-*) — is styled in css/workspace.css, against the class names
+   the modules actually emit. This file owns the app chrome around it: the navbar
+   controls, the rail, the drawer, the modals, and the shared components
+   (.card, .tag, .delta, .stat-tile, table.data) that widgets reuse. */
+
 /* ---- responsive ---- */
 @media(max-width:900px){
+  /* The grid's own collapse, and handing scrolling back to the page, live in
+     css/workspace.css: that file is linked second, and a media query carries no
+     extra specificity to win with from here. */
   .ws-side{position:fixed;top:var(--nav-h);left:0;bottom:0;z-index:120;transform:translateX(-100%);transition:transform .2s;}
   .ws-side.open{transform:translateX(0);}
   .workspace{display:block;} .ws-main{height:auto;}
