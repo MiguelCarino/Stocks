@@ -32,6 +32,9 @@ import { sparkline, drawLineChart } from './viz.js';
 import { sessionAt, marketForSymbol, formatCountdown, MARKETS, HOLIDAY_HORIZON } from './session.js';
 import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtTime, fmtAge } from './format.js';
 
+// UI-string translation via the site dictionary (i18n.js); identity when absent.
+const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+
 const DASH = '—';
 const STALE_FLOOR_MS = 90000;   // matches app.js: never call a quote stale inside 90s
 const TICK_MS = 1000;           // countdowns and staleness ages are clocks, not poll results
@@ -421,7 +424,7 @@ function applyPrivacy(root, ctx) {
 function createCards(host, ctx) {
   let cur = ctx || {};
   const grid = el('div', 'card-grid');
-  const empty = el('p', 'empty-cell', 'No symbols yet. Add one from the watchlist.');
+  const empty = el('p', 'empty-cell', i18nT('No symbols yet. Add one from the watchlist.'));
   host.append(grid, empty);
 
   const cards = new Map();     // sym -> refs, so a repaint is a text write
@@ -749,7 +752,7 @@ function createPortfolio(host, ctx) {
   wrap.appendChild(table);
 
   const emptyRow = el('tr');
-  const emptyCell = el('td', 'empty-cell', EMPTY_HOLDINGS);
+  const emptyCell = el('td', 'empty-cell', i18nT(EMPTY_HOLDINGS));
   emptyCell.colSpan = PORT_COLS.length;
   emptyRow.appendChild(emptyCell);
 
@@ -792,7 +795,7 @@ function createPortfolio(host, ctx) {
     if (!totals) {
       // Better an empty table than one filled with numbers whose arithmetic
       // failed halfway.
-      setText(emptyCell, 'This portfolio could not be valued.');
+      setText(emptyCell, i18nT('This portfolio could not be valued.'));
       showEmpty();
       return;
     }
@@ -821,7 +824,7 @@ function createPortfolio(host, ctx) {
     setTile(tiles.cost, money(totals.cost), null, null);
 
     const list = totals.rows;
-    if (!list.length) { setText(emptyCell, EMPTY_HOLDINGS); showEmpty(); return; }
+    if (!list.length) { setText(emptyCell, i18nT(EMPTY_HOLDINGS)); showEmpty(); return; }
     if (emptyRow.parentNode) emptyRow.remove();
 
     const keys = list.map((r, i) => rowKey(r, i));
@@ -945,7 +948,7 @@ function portfolioCurrency(ctx, holdings) {
 function createTape(host, ctx) {
   let cur = ctx || {};
   const root = el('div', 'wg-tape');
-  const empty = el('span', 'field-note', 'No symbols yet.');
+  const empty = el('span', 'field-note', i18nT('No symbols yet.'));
   root.appendChild(empty);
   host.appendChild(root);
 
@@ -1024,14 +1027,14 @@ function createAlerts(host, ctx) {
   let cur = ctx || {};
   const root = el('div', 'wg-alerts');
   const rulesBox = el('div', 'wg-rules');
-  const rulesEmpty = el('p', 'field-note', 'No armed rules.');
+  const rulesEmpty = el('p', 'field-note', i18nT('No armed rules.'));
   const disarmed = el('p', 'field-note', '');
   disarmed.hidden = true;
   const logBox = el('div', 'alert-log');
-  const logEmpty = el('p', 'field-note', 'Nothing has triggered yet.');
+  const logEmpty = el('p', 'field-note', i18nT('Nothing has triggered yet.'));
 
-  root.append(sectionHead('Armed rules'), rulesBox, rulesEmpty, disarmed,
-    sectionHead('Recent fires'), logBox, logEmpty);
+  root.append(sectionHead(i18nT('Armed rules')), rulesBox, rulesEmpty, disarmed,
+    sectionHead(i18nT('Recent fires')), logBox, logEmpty);
   host.appendChild(root);
 
   const unwire = wirePicks(root, () => cur);

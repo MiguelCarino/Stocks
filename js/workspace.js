@@ -57,6 +57,9 @@ const el = (tag, cls, txt) => {
   return e;
 };
 const safe = (fn, fallback = null) => { try { return fn(); } catch (e) { return fallback; } };
+// Fleet i18n bridge — i18n.js is a deferred classic script and this module runs
+// after it, but the guard keeps the file usable if the dictionary is absent.
+const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
 
 let idSeq = 0;
 function mintId(prefix) { return prefix + Date.now().toString(36) + (idSeq++).toString(36); }
@@ -479,8 +482,8 @@ function renderEmpty(tab) {
   if (tab.widgets.length) { if (existing) existing.remove(); return; }
   if (existing) return;
   const box = el('div', 'wk-empty');
-  box.appendChild(el('p', null, 'This tab is empty.'));
-  const add = el('button', 'btn-primary', 'Add a widget');
+  box.appendChild(el('p', null, i18nT('This tab is empty.')));
+  const add = el('button', 'btn-primary', i18nT('Add a widget'));
   add.type = 'button';
   add.addEventListener('click', () => openPicker());
   box.appendChild(add);
@@ -883,11 +886,11 @@ function buildShell() {
   wrap.appendChild(picker);
   bar.appendChild(wrap);
 
-  const reset = el('button', 'cs-btn wk-reset', 'Reset layout');
+  const reset = el('button', 'cs-btn wk-reset', i18nT('Reset layout'));
   reset.type = 'button';
-  reset.title = 'Restore the default tabs and widgets';
+  reset.title = i18nT('Restore the default tabs and widgets');
   reset.addEventListener('click', () => {
-    if (safe(() => window.confirm('Discard your tabs and widgets and restore the default workspace?'), true)) workspace.reset();
+    if (safe(() => window.confirm(i18nT('Discard your tabs and widgets and restore the default workspace?')), true)) workspace.reset();
   });
   bar.appendChild(reset);
 
@@ -990,6 +993,21 @@ export const workspace = {
       try { f.inst.update(forWidget(shared, w)); }
       catch (e) { f.wrap.classList.add('wk-w-error'); }
     }
+  },
+
+  // A fleet language switch changes strings that were resolved at creation
+  // time — shell chrome, widget headers, widget empty states — and no widget
+  // exposes a relabel hook. Tearing the shell down and rebuilding it is
+  // lossless because layout and per-widget state both live on the model, not
+  // in the DOM; frames are destroyed first so their wraps are not orphaned by
+  // buildShell() clearing the host.
+  relabel() {
+    if (!model || !host) return;
+    destroyAllFrames();
+    buildShell();
+    renderTabs();
+    syncFrames();
+    this.update();
   },
 
   tabs() {

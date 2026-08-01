@@ -37,6 +37,8 @@ import { workspace } from './workspace.js';
 import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime, fmtCap } from './format.js';
 
 const $ = (id) => document.getElementById(id);
+// UI-string translation via the site dictionary (i18n.js); identity when absent.
+const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const safe = (fn, fallback = null) => { try { return fn(); } catch (e) { return fallback; } };
 
@@ -84,9 +86,9 @@ function boot() {
   // drawing from caches the store is about to drop anyway.
   safe(() => store.evictCaches && store.evictCaches());
 
-  $('pageDisclaimer').textContent = DISCLAIMER;
-  $('railDisclaimer').textContent = 'Data stays in your browser. Not investment advice.';
-  $('ackText').textContent = DISCLAIMER;
+  $('pageDisclaimer').textContent = i18nT(DISCLAIMER);
+  $('railDisclaimer').textContent = i18nT('Data stays in your browser. Not investment advice.');
+  $('ackText').textContent = i18nT(DISCLAIMER);
   $('sessApprox').textContent = 'Holiday table ends ' + HOLIDAY_HORIZON + ' — later dates are rule-derived, not confirmed';
 
   applySettingsToUI();
@@ -102,6 +104,7 @@ function boot() {
   renderSession();
   wireQuota();
   renderQuota();
+  wireLangSwitch();
   reportStorage();
 
   if (!store.settings.ack) $('ackGate').hidden = false;
@@ -812,7 +815,7 @@ function renderHoldings() {
   const body = $('holdBody');
   body.textContent = '';
   if (!rows.length) {
-    const tr = el('tr'); const td = el('td', 'empty-cell', 'No holdings yet. Add one below.');
+    const tr = el('tr'); const td = el('td', 'empty-cell', i18nT('No holdings yet. Add one below.'));
     td.colSpan = 6; tr.appendChild(td); body.appendChild(tr);
     return;
   }
@@ -1416,7 +1419,7 @@ function scopeOf(rule) {
 
 function renderRuleList() {
   const list = $('ruleList'); list.textContent = '';
-  if (!store.rules.length) { list.appendChild(el('p', 'field-note', 'No alert rules yet.')); return; }
+  if (!store.rules.length) { list.appendChild(el('p', 'field-note', i18nT('No alert rules yet.'))); return; }
   for (const r of store.rules) {
     const row = el('div', 'rule-row');
     const sw = el('button', 'switch' + (r.armed ? ' on' : '')); sw.title = 'Arm/disarm';
@@ -1502,7 +1505,10 @@ let editingHolding = null;
 function openHolding(h) {
   editingHolding = h;
   openModal('holdingModal', () => {
-    $('holdingTitle').textContent = h ? 'Edit holding' : 'Add holding';
+    // Keep the captured static key in step, or applyStaticI18n relabels the
+    // dialog 'Add holding' on the next language switch. (Fleet pattern: Quote.)
+    $('holdingTitle').dataset.i18nKey = h ? 'Edit holding' : 'Add holding';
+    $('holdingTitle').textContent = i18nT(h ? 'Edit holding' : 'Add holding');
     $('holdSym').value = h ? h.symbol : ''; $('holdShares').value = h ? h.shares : '';
     $('holdCost').value = h ? h.cost : ''; $('holdMode').value = h ? h.costMode : 'per';
     $('holdNote').value = h ? (h.note || '') : '';
@@ -1591,6 +1597,24 @@ function updateModeChip() {
   chip.textContent = m.text; chip.classList.toggle('live', m.live);
   chip.title = 'Data source' + (leaderless ? ' · refreshing independently: no window holds the shared lock' : '');
 }
+/* i18n.js re-applies the static markup, the attribute table and the three
+   boot-filled ids, but everything this file and the widgets build from JS keeps
+   whatever locale it was created in. i18n.js registered its own listener first
+   (deferred classic script, ahead of this module), so t() already resolves to
+   the new language by the time this handler runs. Deliberately not refreshAll():
+   a language switch must not trigger a provider poll. */
+function wireLangSwitch() {
+  window.addEventListener('carino:langchange', () => {
+    safe(() => workspace.relabel());
+    renderRail();
+    renderRuleList();
+    updateModeChip();
+    renderMarketStrip();
+    renderSession();
+    if (!$('holdingsModal').hidden) renderHoldings();
+  });
+}
+
 function refreshAll() {
   renderRail(); refreshWidgets(); updateModeChip(); renderMarketStrip(); renderSession();
   if (!$('holdingsModal').hidden) renderHoldings();

@@ -33,8 +33,8 @@
       <!-- Shortcuts to the tab that shows each thing, not a second navigation:
            the workspace tabs own what is on screen. -->
       <div class="seg" role="group" aria-label="Jump to workspace tab">
-        <button class="cs-btn seg-btn active" id="viewWatch" title="Show a tab with the watchlist">Watchlist</button>
-        <button class="cs-btn seg-btn" id="viewPort" title="Show a tab with the portfolio">Portfolio</button>
+        <button class="cs-btn seg-btn active" id="viewWatch" title="Show a tab with the watchlist" data-i18n>Watchlist</button>
+        <button class="cs-btn seg-btn" id="viewPort" title="Show a tab with the portfolio" data-i18n>Portfolio</button>
       </div>
       <button class="cs-btn" id="btnHoldings" title="Holdings — add or edit">💼</button>
       <button class="cs-btn" id="btnPrivacy" title="Blur amounts">👁</button>
@@ -47,12 +47,11 @@
   <!-- Shared-link banner: only shown while the watchlist came from the URL hash -->
   <div class="hash-banner" id="hashBanner" hidden>
     <div class="hb-text">
-      <strong>Shared view.</strong> This watchlist came from the link you opened. It is not saved in this browser,
-      and your own watchlist is untouched.
+      <strong data-i18n>Shared view.</strong> <span data-i18n>This watchlist came from the link you opened. It is not saved in this browser, and your own watchlist is untouched.</span>
     </div>
     <div class="hb-acts">
-      <button class="btn-primary sm" id="hashAdopt">Save to my browser</button>
-      <button class="cs-btn" id="hashDiscard">Discard</button>
+      <button class="btn-primary sm" id="hashAdopt" data-i18n>Save to my browser</button>
+      <button class="cs-btn" id="hashDiscard" data-i18n>Discard</button>
     </div>
   </div>
 
@@ -67,7 +66,7 @@
         <span class="sess-conflict" id="sessConflict" hidden></span>
       </span>
       <span class="mkt-updated" id="mktUpdated"></span>
-      <span class="mkt-note">Delayed · not investment advice</span>
+      <span class="mkt-note" data-i18n>Delayed · not investment advice</span>
     </div>
   </div>
 
@@ -79,26 +78,26 @@
         <div class="autocomplete" id="railAuto" hidden></div>
       </div>
       <div class="rail-sort">
-        <span class="rail-lbl">Watchlist</span>
+        <span class="rail-lbl" data-i18n>Watchlist</span>
         <!-- One order for the whole workspace: every widget is handed the symbols
              in this order. The table can still sort its own columns on top. -->
         <select class="cs-select sm" id="sortSel" title="Symbol order for every widget">
-          <option value="added">Recent</option>
-          <option value="change">Change %</option>
-          <option value="alpha">A–Z</option>
+          <option value="added" data-i18n>Recent</option>
+          <option value="change" data-i18n>Change %</option>
+          <option value="alpha" data-i18n>A–Z</option>
         </select>
       </div>
       <div class="rail-list" id="railList"></div>
       <!-- First run: the workspace widgets can only say the list is empty, not
            offer to fill it, so the offer lives beside the list itself. -->
       <div class="rail-empty" id="railEmpty" hidden>
-        <p>Your watchlist is empty.</p>
-        <button class="btn-primary sm" id="emptyAdd">Add a ticker</button>
-        <button class="cs-btn" id="emptyDemo">Load demo watchlist</button>
+        <p data-i18n>Your watchlist is empty.</p>
+        <button class="btn-primary sm" id="emptyAdd" data-i18n>Add a ticker</button>
+        <button class="cs-btn" id="emptyDemo" data-i18n>Load demo watchlist</button>
       </div>
       <div class="rail-foot">
         <div class="quota" id="quotaBox" hidden>
-          <span class="rail-lbl">API credits</span>
+          <span class="rail-lbl" data-i18n>API credits</span>
           <div class="progress"><div class="progress-bar" id="quotaBar"></div></div>
           <span class="quota-txt" id="quotaTxt"></span>
           <span class="quota-txt quota-sub" id="quotaSub"></span>
@@ -130,115 +129,112 @@
   <div class="modal-scrim" id="modalScrim" hidden>
     <!-- Settings -->
     <div class="modal" id="settingsModal" hidden>
-      <div class="modal-head"><div class="modal-title">Settings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-head"><div class="modal-title" data-i18n>Settings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
-        <p class="field-note">Bring your own free, read-only API keys. They are stored only in this browser and sent only to the provider.</p>
+        <p class="field-note" data-i18n>Bring your own free, read-only API keys. They are stored only in this browser and sent only to the provider.</p>
         <div class="field-row">
-          <label class="field"><span>Provider</span>
+          <label class="field"><span data-i18n>Provider</span>
             <select class="input" id="setProvider">
               <option value="finnhub">Finnhub</option>
               <option value="twelvedata">Twelve Data</option>
               <option value="polygon">Polygon</option>
               <option value="alpaca">Alpaca</option>
               <option value="alphavantage">Alpha Vantage</option>
-              <option value="demo">Demo (no key)</option>
+              <option value="demo" data-i18n>Demo (no key)</option>
             </select></label>
-          <label class="field"><span>Refresh (s)</span>
+          <label class="field"><span data-i18n>Refresh (s)</span>
             <input type="number" class="input" id="setInterval" min="5" max="600" /></label>
         </div>
         <!-- The caption is one element: a flex row would otherwise split the text
              into separate items either side of the <strong> and misalign it. -->
-        <label class="chk"><input type="checkbox" id="setUniversal" /><span>Use this provider for <strong>all</strong> symbols (universal). Off = auto-route each symbol by asset class.</span></label>
+        <label class="chk"><input type="checkbox" id="setUniversal" /><span><span data-i18n>Use this provider for</span> <strong data-i18n>all</strong> <span data-i18n>symbols (universal). Off = auto-route each symbol by asset class.</span></span></label>
 
         <!-- Per-provider key config; only the selected provider's block is shown. -->
         <div class="provider-config" data-provider="finnhub">
-          <label class="field"><span>Finnhub API key</span>
+          <label class="field"><span data-i18n>Finnhub API key</span>
             <input type="password" class="input" id="setFinnhub" placeholder="finnhub.io free key" autocomplete="off" /></label>
         </div>
         <div class="provider-config" data-provider="twelvedata" hidden>
-          <label class="field"><span>Twelve Data API key</span>
+          <label class="field"><span data-i18n>Twelve Data API key</span>
             <input type="password" class="input" id="setTwelve" placeholder="twelvedata.com free key" autocomplete="off" /></label>
         </div>
         <div class="provider-config" data-provider="polygon" hidden>
-          <label class="field"><span>Polygon API key</span>
+          <label class="field"><span data-i18n>Polygon API key</span>
             <input type="password" class="input" id="setPolygon" placeholder="polygon.io key" autocomplete="off" /></label>
         </div>
         <div class="provider-config" data-provider="alphavantage" hidden>
-          <label class="field"><span>Alpha Vantage API key</span>
+          <label class="field"><span data-i18n>Alpha Vantage API key</span>
             <input type="password" class="input" id="setAlpha" placeholder="alphavantage.co key" autocomplete="off" /></label>
         </div>
         <div class="provider-config" data-provider="alpaca" hidden>
           <div class="field-row">
-            <label class="field"><span>Alpaca key ID</span>
+            <label class="field"><span data-i18n>Alpaca key ID</span>
               <input type="password" class="input" id="setAlpacaId" placeholder="Alpaca key id" autocomplete="off" /></label>
-            <label class="field"><span>Alpaca secret</span>
+            <label class="field"><span data-i18n>Alpaca secret</span>
               <input type="password" class="input" id="setAlpacaSecret" placeholder="Alpaca secret" autocomplete="off" /></label>
           </div>
-          <p class="field-note">⚠️ Alpaca keys grant account access and may be blocked by browser CORS — use a paper / read-only key.</p>
+          <p class="field-note" data-i18n>⚠️ Alpaca keys grant account access and may be blocked by browser CORS — use a paper / read-only key.</p>
         </div>
         <div class="provider-config" data-provider="demo" hidden>
-          <p class="field-note">Demo mode uses bundled sample data — no key required.</p>
+          <p class="field-note" data-i18n>Demo mode uses bundled sample data — no key required.</p>
         </div>
         <p class="field-note" id="providerModeNote"></p>
         <div class="toggles">
-          <label class="chk"><input type="checkbox" id="setNotify" /> Browser notifications on alert</label>
-          <label class="chk"><input type="checkbox" id="setSound" /> Sound on alert</label>
-          <label class="chk"><input type="checkbox" id="setMarket" /> Show market-status strip</label>
-          <label class="chk"><input type="checkbox" id="setPrivacy" /> Blur amounts by default</label>
+          <label class="chk"><input type="checkbox" id="setNotify" /> <span data-i18n>Browser notifications on alert</span></label>
+          <label class="chk"><input type="checkbox" id="setSound" /> <span data-i18n>Sound on alert</span></label>
+          <label class="chk"><input type="checkbox" id="setMarket" /> <span data-i18n>Show market-status strip</span></label>
+          <label class="chk"><input type="checkbox" id="setPrivacy" /> <span data-i18n>Blur amounts by default</span></label>
         </div>
         <div class="key-status" id="keyStatus"></div>
         <div class="field-note">
-          <a href="https://finnhub.io/register" target="_blank" rel="noopener">Get a Finnhub key ↗</a> ·
-          <a href="https://twelvedata.com/pricing" target="_blank" rel="noopener">Get a Twelve Data key ↗</a>
+          <a href="https://finnhub.io/register" target="_blank" rel="noopener" data-i18n>Get a Finnhub key ↗</a> ·
+          <a href="https://twelvedata.com/pricing" target="_blank" rel="noopener" data-i18n>Get a Twelve Data key ↗</a>
         </div>
 
         <!-- Detached displays: popout windows + Picture-in-Picture -->
         <section class="settings-section" id="displaysSection">
-          <h3 class="section-title">Detached displays</h3>
-          <p class="field-note">Put a panel in its own window or a Picture-in-Picture tile — a second monitor, a TV,
-            or a strip docked over other apps. Panels receive prices from this window and never fetch on their own,
-            so an extra panel costs no API credits.</p>
+          <h3 class="section-title" data-i18n>Detached displays</h3>
+          <p class="field-note" data-i18n>Put a panel in its own window or a Picture-in-Picture tile — a second monitor, a TV, or a strip docked over other apps. Panels receive prices from this window and never fetch on their own, so an extra panel costs no API credits.</p>
           <div class="cap-list" id="dispCaps"></div>
           <div class="field-row">
-            <label class="field"><span>Panel</span><select class="input" id="dispPanel"></select></label>
-            <label class="field"><span>Mode</span>
+            <label class="field"><span data-i18n>Panel</span><select class="input" id="dispPanel"></select></label>
+            <label class="field"><span data-i18n>Mode</span>
               <select class="input" id="dispMode">
-                <option value="auto">Auto</option>
-                <option value="window">Window</option>
-                <option value="pip">Picture-in-Picture</option>
+                <option value="auto" data-i18n>Auto</option>
+                <option value="window" data-i18n>Window</option>
+                <option value="pip" data-i18n>Picture-in-Picture</option>
               </select></label>
           </div>
           <p class="field-note" id="dispPanelDesc"></p>
           <div class="picker-row">
-            <label class="field"><span>Monitor</span>
-              <select class="input" id="dispScreen"><option value="">This monitor</option></select></label>
-            <button class="cs-btn" id="dispDetect">Detect monitors</button>
+            <label class="field"><span data-i18n>Monitor</span>
+              <select class="input" id="dispScreen"><option value="" data-i18n>This monitor</option></select></label>
+            <button class="cs-btn" id="dispDetect" data-i18n>Detect monitors</button>
           </div>
           <div class="disp-acts">
-            <button class="btn-primary" id="dispOpen">Open panel</button>
-            <button class="cs-btn" id="dispReplace">Re-place windows</button>
-            <button class="cs-btn" id="dispCloseAll">Close all</button>
+            <button class="btn-primary" id="dispOpen" data-i18n>Open panel</button>
+            <button class="cs-btn" id="dispReplace" data-i18n>Re-place windows</button>
+            <button class="cs-btn" id="dispCloseAll" data-i18n>Close all</button>
           </div>
           <div class="disp-open" id="dispOpenList"></div>
           <p class="field-note warn-note" id="dispPlaceNote" hidden></p>
-          <p class="field-note">Panels open one at a time: a browser grants only the first new window per click, so
-            there is no one-click restore of a saved layout.</p>
+          <p class="field-note" data-i18n>Panels open one at a time: a browser grants only the first new window per click, so there is no one-click restore of a saved layout.</p>
         </section>
 
         <p class="field-note" id="storageNote"></p>
       </div>
       <div class="modal-foot">
-        <button class="cs-btn danger" id="btnClearData">Clear all data</button>
+        <button class="cs-btn danger" id="btnClearData" data-i18n>Clear all data</button>
         <span class="spacer"></span>
-        <button class="cs-btn" id="btnExport">Export</button>
-        <button class="cs-btn" id="btnImport">Import</button>
-        <button class="btn-primary" id="btnSaveSettings">Save</button>
+        <button class="cs-btn" id="btnExport" data-i18n>Export</button>
+        <button class="cs-btn" id="btnImport" data-i18n>Import</button>
+        <button class="btn-primary" id="btnSaveSettings" data-i18n>Save</button>
       </div>
     </div>
 
     <!-- Add ticker -->
     <div class="modal" id="addModal" hidden>
-      <div class="modal-head"><div class="modal-title">Add ticker</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-head"><div class="modal-title" data-i18n>Add ticker</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
         <input type="text" class="input" id="addSearch" placeholder="Search symbol or company…" autocomplete="off" />
         <div class="autocomplete inline" id="addAuto"></div>
@@ -247,26 +243,26 @@
 
     <!-- Alerts -->
     <div class="modal" id="alertsModal" hidden>
-      <div class="modal-head"><div class="modal-title">Alert rules</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-head"><div class="modal-title" data-i18n>Alert rules</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
         <div class="rule-add">
           <select class="input" id="ruleSym"></select>
-          <select class="input" id="ruleType"><option value="price">Price</option><option value="pct">Change %</option></select>
+          <select class="input" id="ruleType"><option value="price" data-i18n>Price</option><option value="pct" data-i18n>Change %</option></select>
           <select class="input" id="ruleOp"><option value="above">≥</option><option value="below">≤</option></select>
           <input type="number" class="input" id="ruleVal" placeholder="value" step="any" />
-          <button class="btn-primary" id="ruleAdd">Add</button>
+          <button class="btn-primary" id="ruleAdd" data-i18n>Add</button>
         </div>
-        <label class="field"><span>Session scope</span>
+        <label class="field"><span data-i18n>Session scope</span>
           <select class="input" id="ruleSess">
-            <option value="regular">Regular hours only</option>
-            <option value="extended">Include extended hours</option>
-            <option value="any">Any session</option>
+            <option value="regular" data-i18n>Regular hours only</option>
+            <option value="extended" data-i18n>Include extended hours</option>
+            <option value="any" data-i18n>Any session</option>
           </select></label>
         <p class="field-note" id="ruleSessNote"></p>
         <div class="rule-list" id="ruleList"></div>
         <div class="log-head">
-          <span class="rail-lbl">Recently triggered</span>
-          <select class="cs-select sm" id="logFilter" title="Filter by symbol"><option value="">All symbols</option></select>
+          <span class="rail-lbl" data-i18n>Recently triggered</span>
+          <select class="cs-select sm" id="logFilter" title="Filter by symbol"><option value="" data-i18n>All symbols</option></select>
           <button class="cs-btn" id="btnLogCsv" title="Download the alert log as CSV">CSV</button>
         </div>
         <div class="alert-log" id="alertLog"></div>
@@ -277,18 +273,17 @@
          readers and may not write to storage, so adding, editing and deleting a
          holding happens here. -->
     <div class="modal" id="holdingsModal" hidden>
-      <div class="modal-head"><div class="modal-title">Holdings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-head"><div class="modal-title" data-i18n>Holdings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
-        <p class="field-note">Positions you enter by hand. Nothing here is connected to a brokerage — Stocks cannot see
-          your account and cannot place a trade.</p>
+        <p class="field-note" data-i18n>Positions you enter by hand. Nothing here is connected to a brokerage — Stocks cannot see your account and cannot place a trade.</p>
         <!-- Only shown when holdings span more than one currency: the totals are
              a plain sum and must say so rather than pick a symbol. -->
         <p class="field-note warn-note" id="holdCurNote" hidden></p>
         <div class="table-wrap">
           <table class="data" id="holdTable">
             <thead><tr>
-              <th>Symbol</th><th class="num">Shares</th><th class="num">Avg Cost</th>
-              <th class="num">Last</th><th class="num">Mkt Value</th><th></th>
+              <th data-i18n>Symbol</th><th class="num" data-i18n>Shares</th><th class="num" data-i18n>Avg Cost</th>
+              <th class="num" data-i18n>Last</th><th class="num" data-i18n>Mkt Value</th><th></th>
             </tr></thead>
             <tbody id="holdBody"></tbody>
           </table>
@@ -296,26 +291,26 @@
       </div>
       <div class="modal-foot">
         <span class="spacer"></span>
-        <button class="btn-primary" id="addHolding">＋ Add holding</button>
+        <button class="btn-primary" id="addHolding" data-i18n>＋ Add holding</button>
       </div>
     </div>
 
     <!-- Holding editor -->
     <div class="modal" id="holdingModal" hidden>
-      <div class="modal-head"><div class="modal-title" id="holdingTitle">Add holding</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-head"><div class="modal-title" id="holdingTitle" data-i18n>Add holding</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
-        <label class="field"><span>Symbol</span><input type="text" class="input" id="holdSym" autocomplete="off" /></label>
+        <label class="field"><span data-i18n>Symbol</span><input type="text" class="input" id="holdSym" autocomplete="off" /></label>
         <div class="field-row">
-          <label class="field"><span>Shares</span><input type="number" class="input" id="holdShares" step="any" /></label>
-          <label class="field"><span>Cost</span><input type="number" class="input" id="holdCost" step="any" /></label>
-          <label class="field"><span>Basis</span><select class="input" id="holdMode"><option value="per">Per share</option><option value="total">Total</option></select></label>
+          <label class="field"><span data-i18n>Shares</span><input type="number" class="input" id="holdShares" step="any" /></label>
+          <label class="field"><span data-i18n>Cost</span><input type="number" class="input" id="holdCost" step="any" /></label>
+          <label class="field"><span data-i18n>Basis</span><select class="input" id="holdMode"><option value="per" data-i18n>Per share</option><option value="total" data-i18n>Total</option></select></label>
         </div>
-        <label class="field"><span>Note (optional)</span><input type="text" class="input" id="holdNote" autocomplete="off" /></label>
+        <label class="field"><span data-i18n>Note (optional)</span><input type="text" class="input" id="holdNote" autocomplete="off" /></label>
       </div>
       <div class="modal-foot">
-        <button class="cs-btn danger" id="holdDelete" hidden>Delete</button>
+        <button class="cs-btn danger" id="holdDelete" hidden data-i18n>Delete</button>
         <span class="spacer"></span>
-        <button class="btn-primary" id="holdSave">Save</button>
+        <button class="btn-primary" id="holdSave" data-i18n>Save</button>
       </div>
     </div>
   </div>
@@ -334,12 +329,13 @@
     <div class="ack-card">
       <div class="ack-brand">Carino <span>Stocks</span></div>
       <p class="ack-text" id="ackText"></p>
-      <button class="btn-primary" id="ackBtn">I understand — continue</button>
+      <button class="btn-primary" id="ackBtn" data-i18n>I understand — continue</button>
     </div>
   </div>
 
   <script src="carino-navbar.js" data-app="Stocks" defer></script>
   <script src="carino-lang.js" defer></script>
+  <script src="i18n.js" defer></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

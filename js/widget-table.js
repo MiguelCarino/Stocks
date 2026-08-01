@@ -22,6 +22,8 @@ import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtCap, fmtTime, fmtAge }
 import { sessionAt, marketForSymbol } from './session.js';
 
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+// Fleet i18n bridge — guarded so the module still works without the dictionary.
+const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
 
 // Wraps a host-supplied callback. A widget must not blank itself because the
 // container handed it a function that throws on one symbol.
@@ -370,7 +372,7 @@ function createTable(host, ctx0) {
     tbody.textContent = '';
     if (!data.length) {
       const tr = el('tr', 'wt-emptyrow');
-      const td = el('td', 'wt-emptycell', 'No symbols in this watchlist yet.');
+      const td = el('td', 'wt-emptycell', (window.CarinoI18n ? window.CarinoI18n.t('No symbols in this watchlist yet.') : 'No symbols in this watchlist yet.'));
       td.colSpan = list.length;
       tr.appendChild(td);
       tbody.appendChild(tr);
@@ -614,7 +616,7 @@ function buildColMenu(set) {
     list.appendChild(row);
   }
 
-  const reset = el('button', 'wt-colreset', 'Restore defaults');
+  const reset = el('button', 'wt-colreset', i18nT('Restore defaults'));
   reset.type = 'button';
   reset.addEventListener('click', () => set(DEFAULT_COLS.slice()));
 
