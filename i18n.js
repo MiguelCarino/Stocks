@@ -6,6 +6,10 @@
 
 const I18N = {
     es: {
+        'Late shift.': 'Turno nocturno.',
+        'Good morning.': 'Buenos días.',
+        'Good afternoon.': 'Buenas tardes.',
+        'Good evening.': 'Buenas noches.',
         // Header / rail
         'Watchlist': 'Lista de seguimiento',
         'Portfolio': 'Portafolio',
@@ -133,6 +137,10 @@ const I18N = {
         'No alert rules yet.': 'Aún no hay reglas de alerta.',
     },
     'pt-BR': {
+        'Late shift.': 'Turno da noite.',
+        'Good morning.': 'Bom dia.',
+        'Good afternoon.': 'Boa tarde.',
+        'Good evening.': 'Boa noite.',
         'Watchlist': 'Lista de acompanhamento',
         'Portfolio': 'Carteira',
         'Recent': 'Recentes',
@@ -250,6 +258,10 @@ const I18N = {
         'No alert rules yet.': 'Ainda não há regras de alerta.',
     },
     ru: {
+        'Late shift.': 'Ночная смена.',
+        'Good morning.': 'Доброе утро.',
+        'Good afternoon.': 'Добрый день.',
+        'Good evening.': 'Добрый вечер.',
         'Watchlist': 'Список наблюдения',
         'Portfolio': 'Портфель',
         'Recent': 'Недавние',
@@ -367,6 +379,10 @@ const I18N = {
         'No alert rules yet.': 'Правил оповещений пока нет.',
     },
     ja: {
+        'Late shift.': '夜勤お疲れさま。',
+        'Good morning.': 'おはようございます。',
+        'Good afternoon.': 'こんにちは。',
+        'Good evening.': 'こんばんは。',
         'Watchlist': 'ウォッチリスト',
         'Portfolio': 'ポートフォリオ',
         'Recent': '追加順',
