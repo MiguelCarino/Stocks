@@ -43,7 +43,7 @@ import { workspace } from './workspace.js';
 // One copy of every number format, shared with the widgets and the popout. The
 // old local copies inferred FX from app state; these take { fx } from the caller,
 // which is why they can be shared at all.
-import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime } from './format.js';
+import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime, priceKind } from './format.js';
 
 const $ = (id) => document.getElementById(id);
 // UI-string translation via the site dictionary (i18n.js); identity when absent.
@@ -791,7 +791,7 @@ function onLevelDrag(sym, level, price) {
   if (!level || level.kind !== 'alert' || !level.ruleId || !Number.isFinite(price)) return;
   const value = Number(price.toPrecision(8));
   safe(() => store.updateRule(level.ruleId, { value }));
-  toast(i18nT('Alert moved') + ': ' + sym + ' ' + fmtMove(value, value));
+  toast(i18nT('Alert moved') + ': ' + sym + ' ' + fmtMove(value, value, fxOpts(sym)));
   refreshWidgets();
   if (!$('alertsModal').hidden) safe(() => renderRuleList());
 }
@@ -888,7 +888,7 @@ function deltaChip(q) {
   c.classList.add(up ? 'up' : 'down');
   // The change shares the price's precision. Two decimals turned every move on a
   // sub-dollar coin or an FX pair into "0.00" next to a non-zero percentage.
-  c.textContent = `${up ? '▲' : '▼'} ${fmtMove(q.change, q.price)} (${fmtNum(q.changePct)}%)`;
+  c.textContent = `${up ? '▲' : '▼'} ${fmtMove(q.change, q.price, q.symbol ? fxOpts(q.symbol) : undefined)} (${fmtNum(q.changePct)}%)`;
   return c;
 }
 
@@ -1125,7 +1125,7 @@ function renderDrawer() {
   // only if the drawer still shows the symbol that asked.
   const live = () => my === drawerToken && drawerSym === sym;
   market.profile(sym).then((p) => { if (!live() || !p) return; $('drawerTitle').textContent = sym + (p.name ? ' · ' + p.name : ''); refreshDrawer(); }).catch(() => {});
-  fundamentalsFor(sym).then((f) => { if (live()) renderFundamentals(fundBox, f, { quote: state.quotes[sym], fx: fxOpts(sym).fx }); })
+  fundamentalsFor(sym).then((f) => { if (live()) renderFundamentals(fundBox, f, { quote: state.quotes[sym], ...fxOpts(sym) }); })
     .catch(() => { if (live()) renderFundamentals(fundBox, null); });
   market.events(sym).then((ev) => { if (live()) renderEvents(evBox, ev); }).catch(() => { if (live()) renderEvents(evBox, null); });
   market.news(sym, { limit: 8 }).then((n) => { if (live()) renderNewsList(newsBox, n, { compact: false }); }).catch(() => { if (live()) renderNewsList(newsBox, []); });
@@ -1156,15 +1156,16 @@ function refreshDrawer() {
   setTxt(c.last, q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : uncov ? i18nT('Not covered') : '—');
   // Every figure on this row inherits the price's precision, as the delta chip
   // already did: two decimals turns a sub-dollar coin's whole day into "0.00".
-  setTxt(c.change, q && q.changePct != null ? `${fmtMove(q.change, q.price)} (${fmtNum(q.changePct)}%)` : '—');
+  const po = fxOpts(sym);
+  setTxt(c.change, q && q.changePct != null ? `${fmtMove(q.change, q.price, po)} (${fmtNum(q.changePct)}%)` : '—');
   c.change.className = 'kv-v amount ' + (q && q.changePct > 0 ? 'pos' : q && q.changePct < 0 ? 'neg' : '');
   // The three-value vocabulary is too coarse for "an IEX close" versus "the
   // official one", so the provider's own sentence is the tooltip when it has one.
   setTxt(c.baseline, baselineText(sym, q));
   c.baseline.title = q && q.baselineNote ? i18nT(q.baselineNote) : '';
-  setTxt(c.open, q ? fmtMove(q.open, q.price) : '—');
-  setTxt(c.prev, q ? fmtMove(q.prevClose, q.price) : '—');
-  setTxt(c.range, q && q.low != null ? `${fmtMove(q.low, q.price)} – ${fmtMove(q.high, q.price)}` : '—');
+  setTxt(c.open, q ? fmtMove(q.open, q.price, po) : '—');
+  setTxt(c.prev, q ? fmtMove(q.prevClose, q.price, po) : '—');
+  setTxt(c.range, q && q.low != null ? `${fmtMove(q.low, q.price, po)} – ${fmtMove(q.high, q.price, po)}` : '—');
   setTxt(c.volume, q && q.volume != null ? fmtInt(q.volume) : '—');
   const prof = store.profiles[sym];
   setTxt(c.exchange, (prof && prof.exchange) || '—');
@@ -2218,7 +2219,11 @@ function refreshAll() {
    needs app state: whether a symbol is a ratio rather than an amount of money is
    a question about the routed market, and format.js is deliberately stateless.
    Bytes stay local — the storage note is the only caller in the app. */
-const fxOpts = (sym) => ({ fx: safe(() => marketForSymbol(sym, state.quotes[sym]) === 'FX', false) });
+// FX is a ratio and a stock quotes in cents; fmtPrice/fmtMove are told which.
+const fxOpts = (sym) => {
+  const m = safe(() => marketForSymbol(sym, state.quotes[sym]), null);
+  return { fx: m === 'FX', kind: priceKind(m) };
+};
 
 function fmtBytes(n) {
   const b = Number(n) || 0;

@@ -19,7 +19,7 @@ import { computePortfolio, ledgerSymbols, ledgerAccounts, positionsCSV } from '.
 import { holdingsToTxns, allocation, drift, portfolioHistory, twrSeries, investorFlows, xirr, riskMetrics,
   maxDrawdown, annualize, dividendIncome, positionSize, riskReward, breakEven, recoveryGain, localToday, OTHER } from './portfolio.js';
 import { createChart } from './chart.js';
-import { fmtPrice, fmtPct, fmtNum, fmtAge } from './format.js';
+import { fmtPrice, fmtPct, fmtNum, fmtAge, priceKind } from './format.js';
 import { helpIcon, learnIdFor, levelAllows } from './learn.js';
 
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
@@ -45,7 +45,10 @@ function quoteOf(ctx, sym) { const q = ctx && ctx.quotes ? ctx.quotes[sym] : nul
 function symbolsOf(ctx) { return (ctx && Array.isArray(ctx.symbols) ? ctx.symbols : []).filter((s) => typeof s === 'string' && s); }
 function subjectOf(ctx, pinned) { return pinned || (ctx && typeof ctx.selection === 'string' && ctx.selection) || symbolsOf(ctx)[0] || null; }
 function applyPrivacy(root, ctx) { root.classList.toggle('wg-privacy', !!(ctx && ctx.privacy)); }
-function priceOpts(ctx, sym) { return { fx: safe(() => ctx.marketFor(sym), '') === 'FX' }; }
+function priceOpts(ctx, sym) {
+  const m = safe(() => ctx.marketFor(sym), '');
+  return { fx: m === 'FX', kind: priceKind(m) };
+}
 function levelOf(ctx) { return (ctx && ctx.level) || (ctx && ctx.settings && ctx.settings.level) || 'standard'; }
 const signCls = (v) => (fin(v) ? (v > 0 ? 'pos' : v < 0 ? 'neg' : '') : '');
 function eduNote(text) { return el('p', 'field-note wg-edu', i18nT(text || 'Educational, not advice.')); }

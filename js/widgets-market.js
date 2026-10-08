@@ -19,7 +19,7 @@
 import { createChart } from './chart.js';
 import { returns, stdev, maxDrawdown } from './indicators.js';
 import { metricsFromBars, applyFilters, treemap, SCAN_FIELDS, SCAN_FIELD_BY_ID, SCAN_PRESETS, SCAN_OPS } from './scan.js';
-import { fmtPrice, fmtPct, fmtNum, fmtVolume, fmtAge } from './format.js';
+import { fmtPrice, fmtPct, fmtNum, fmtVolume, fmtAge, priceKind } from './format.js';
 import { helpIcon, learnIdFor, levelLimit } from './learn.js';
 
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
@@ -41,7 +41,10 @@ function quoteOf(ctx, sym) { const q = ctx && ctx.quotes ? ctx.quotes[sym] : nul
 function profileOf(ctx, sym) { return safe(() => ctx.profileFor(sym), null); }
 function subjectOf(ctx, pinned) { return pinned || (ctx && typeof ctx.selection === 'string' && ctx.selection) || symbolsOf(ctx)[0] || null; }
 function applyPrivacy(root, ctx) { root.classList.toggle('wg-privacy', !!(ctx && ctx.privacy)); }
-function priceOpts(ctx, sym) { return { fx: safe(() => ctx.marketFor(sym), '') === 'FX' }; }
+function priceOpts(ctx, sym) {
+  const m = safe(() => ctx.marketFor(sym), '');
+  return { fx: m === 'FX', kind: priceKind(m) };
+}
 const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
 const signCls = (v) => (fin(v) ? (v > 0 ? 'pos' : v < 0 ? 'neg' : '') : '');
 
@@ -955,7 +958,7 @@ export function renderFundamentals(box, f, opts = {}) {
     else if (kind === 'x') txt = fmtNum(v, 2) + (k === 'peg' ? '' : '×');
     else if (kind === 'pct') txt = fmtNum(v, 2) + '%';
     else if (kind === 'money') txt = (ccy && ccy !== 'USD' ? ccy + ' ' : '$') + fmtNum(v, 2);
-    else if (kind === 'price') txt = fmtPrice(v, ccy, opts.fx ? { fx: true } : undefined);
+    else if (kind === 'price') txt = fmtPrice(v, ccy, { fx: !!opts.fx, kind: opts.kind });
     else if (kind === 'vol') txt = fmtVolume(v);
     else txt = fmtNum(v, 2);
     if (k === 'high52' && f.high52Date) txt += ' (' + f.high52Date + ')';
@@ -1021,7 +1024,7 @@ function createFundamentals(host, ctx) {
       typeof cur.events === 'function' ? Promise.resolve(cur.events(sym)).catch(() => null) : null,
     ]);
     if (my !== token) return;
-    renderFundamentals(box, f, { quote: quoteOf(cur, sym), fx: safe(() => cur.marketFor(sym), '') === 'FX' });
+    renderFundamentals(box, f, { quote: quoteOf(cur, sym), ...priceOpts(cur, sym) });
     renderEvents(evBox, ev);
   }
 

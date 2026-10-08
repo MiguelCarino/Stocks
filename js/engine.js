@@ -4,14 +4,15 @@
    Everything the engine needs to know about the outside world (which market
    session a symbol is in, whether this window leads the peer mesh, whether any
    peer window is on screen) arrives as callbacks the caller injects. The engine
-   therefore imports nothing browser-coupled — store.js plus two pure modules
-   (the alert-type registry and the formatters): session.js stays pure, peers.js
-   stays a browser-coupled singleton, and this file stays testable by handing it
+   therefore imports nothing browser-coupled — store.js plus pure modules (the
+   alert-type registry, the formatters, the session calendar). peers.js stays a
+   browser-coupled singleton, and this file stays testable by handing it
    plain functions instead of a browser. */
 
 import { store } from './store.js';
 import { ALERT_TYPES, paramsFor, liveSeries, isCrossOp, describeRule, formatMetric } from './alerttypes.js';
-import { fmtMove } from './format.js';
+import { fmtMove, priceKind } from './format.js';
+import { marketForSymbol } from './session.js';
 
 const i18nT = (s) => (typeof window !== 'undefined' && window.CarinoI18n ? window.CarinoI18n.t(s) : s);
 
@@ -310,9 +311,13 @@ function dayKey(ts) {
 
 // Precision follows magnitude (format.js) for prices; everything else uses the
 // type's own formatter. A sub-dollar coin no longer reports 'now 0.00'.
+function priceKindOf(sym, q) {
+  try { return sym && sym[0] !== '@' ? priceKind(marketForSymbol(sym, q)) : undefined; } catch { return undefined; }
+}
+
 function fmtMetric(rule, v, q) {
   const def = ALERT_TYPES[rule.type];
-  if (def && def.fmt === 'price' && def.unit === 'price') return fmtMove(v, v) + (q && q.currency && q.currency !== 'USD' ? ' ' + q.currency : '');
+  if (def && def.fmt === 'price' && def.unit === 'price') return fmtMove(v, v, { kind: priceKindOf(rule.symbol, q) }) + (q && q.currency && q.currency !== 'USD' ? ' ' + q.currency : '');
   return formatMetric(rule, v);
 }
 

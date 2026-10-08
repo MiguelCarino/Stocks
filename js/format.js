@@ -7,14 +7,16 @@
    time. A widget system multiplies the number of callers, which makes a shared
    module the only version of this that stays correct.
 
-   The central decision is that precision follows the MAGNITUDE of the number,
-   not the asset class. An FX pair moves in the fourth decimal and a sub-dollar
-   coin has nothing left at the second, but neither fact is knowable from a
-   ticker string we may have classified wrong — whereas 1.0848 is visibly a
-   number that needs four places. Asset class is consulted for exactly one thing,
-   the currency prefix, and even that arrives as an argument: the old fmtPrice
-   reached into app state to decide whether a symbol was FX, which is why it
-   could not be lifted out of app.js at all. Callers pass { fx } instead.
+   Precision follows the MAGNITUDE of the number by default. An FX pair moves in
+   the fourth decimal and a sub-dollar coin has nothing left at the second, and
+   1.0848 is visibly a number that needs four places. Magnitude alone gets one
+   case wrong, though: a $96.44 stock printed as $96.4400, because between 1 and
+   100 a share price and a currency rate look the same. So callers that know the
+   asset class say so — { kind: 'equity' | 'fx' | 'crypto' }, usually built with
+   priceKind(market) — and a known equity drops to cents above $1. With no kind
+   the magnitude rule stands, which is the safe side: an unclassified pair keeps
+   its pips and the worst case is two extra zeros. Like { fx }, the class arrives
+   as an argument; this module never reaches into app state to guess it.
 
    Pure. No imports, no DOM, no ambient state. Intl is still a browser API, so
    every call into it is guarded — a locale-data-less build should print an
@@ -28,8 +30,21 @@ const DASH = '—';
 // visibly too short beside them. Matches the '+'/'−' pairs already in the UI.
 const MINUS = '−';
 
-export function priceDecimals(v) {
+// Market id (session.js: 'US_EQUITY' | 'FX' | 'CRYPTO') to a price kind.
+export function priceKind(market) {
+  if (!market) return undefined;
+  return market === 'FX' ? 'fx' : market === 'CRYPTO' ? 'crypto' : 'equity';
+}
+
+function kindOf(opts) {
+  if (!opts) return undefined;
+  return opts.kind || (opts.fx ? 'fx' : undefined);
+}
+
+export function priceDecimals(v, kind) {
   const a = Math.abs(Number(v) || 0);
+  // Stocks quote in cents; only penny stocks need more.
+  if (kind === 'equity') return a >= 1 ? 2 : a >= 0.01 ? 4 : 6;
   if (a >= 100) return 2;
   if (a >= 1) return 4;
   if (a >= 0.01) return 5;
@@ -46,17 +61,17 @@ export function fmtPrice(v, currency, opts) {
   const fx = !!(opts && opts.fx);
   const prefix = fx ? '' : (!currency || currency === 'USD' ? '$' : currency + ' ');
   const suffix = fx && currency ? ' ' + currency : '';
-  return prefix + group(n, priceDecimals(n)) + suffix;
+  return prefix + group(n, priceDecimals(n, kindOf(opts))) + suffix;
 }
 
 // Absolute move, rendered at the precision of the price it moved. Falling back
 // to the move's own magnitude keeps a change without a price readable instead of
 // rounding it to nothing.
-export function fmtMove(v, price) {
+export function fmtMove(v, price, opts) {
   if (v == null) return DASH;
   const n = Number(v);
   if (!Number.isFinite(n)) return DASH;
-  return group(n, priceDecimals(price != null ? price : n));
+  return group(n, priceDecimals(price != null ? price : n, kindOf(opts)));
 }
 
 export function fmtPct(v) {

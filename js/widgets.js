@@ -35,7 +35,7 @@ import { MARKET_WIDGETS } from './widgets-market.js';
 import { LEARN_WIDGETS } from './widgets-learn.js';
 import { helpIcon } from './learn.js';
 import { sessionAt, marketForSymbol, formatCountdown, MARKETS, HOLIDAY_HORIZON } from './session.js';
-import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtTime, fmtAge } from './format.js';
+import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtTime, fmtAge, priceKind } from './format.js';
 
 // UI-string translation via the site dictionary (i18n.js); identity when absent.
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
@@ -208,8 +208,17 @@ function sessionOf(ctx, sym) {
   return sessionAt(Date.now(), marketOf(ctx, sym));
 }
 
-// FX is a ratio: fmtPrice needs to be told, because it no longer guesses.
-function priceOpts(ctx, sym) { return { fx: marketOf(ctx, sym) === 'FX' }; }
+// FX is a ratio and a stock quotes in cents: fmtPrice needs to be told, because
+// it no longer guesses.
+function priceOpts(ctx, sym) {
+  const m = marketOf(ctx, sym);
+  return { fx: m === 'FX', kind: priceKind(m) };
+}
+
+// For helpers handed only a quote: the quote carries its own symbol.
+function quoteKind(q) {
+  return q && q.symbol ? safe(() => priceKind(marketForSymbol(q.symbol, q)), undefined) : undefined;
+}
 
 function frozenOf(ctx, sym) {
   const v = Number(safe(() => ctx.frozenMs(sym), 0));
@@ -369,7 +378,7 @@ function fillDelta(node, q, opts) {
   // absolute move does not need to repeat what the arrow already said.
   if (q.change == null) { setText(node, arrow + ' ' + fmtPct(q.changePct)); return; }
   const pct = opts && opts.signed ? fmtPct(q.changePct) : fmtNum(q.changePct) + '%';
-  setText(node, arrow + ' ' + fmtMove(q.change, q.price) + ' (' + pct + ')');
+  setText(node, arrow + ' ' + fmtMove(q.change, q.price, { kind: quoteKind(q) }) + ' (' + pct + ')');
 }
 
 /* Baseline, coverage, session and staleness for one symbol, as [kind, text, tip].
@@ -578,8 +587,9 @@ function paintRange(ref, q) {
   const pct = Math.max(0, Math.min(100, ((q.price - q.low) / (q.high - q.low)) * 100));
   // At the price's precision, as app.js's day-range line does it: two decimals
   // turns a sub-dollar coin's whole range into '0.00 – 0.00'.
-  setText(ref.lo, fmtMove(q.low, q.price));
-  setText(ref.hi, fmtMove(q.high, q.price));
+  const kind = { kind: quoteKind(q) };
+  setText(ref.lo, fmtMove(q.low, q.price, kind));
+  setText(ref.hi, fmtMove(q.high, q.price, kind));
   const left = pct.toFixed(2) + '%';
   if (ref.mark.style.left !== left) ref.mark.style.left = left;
 }

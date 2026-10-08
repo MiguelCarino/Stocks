@@ -30,7 +30,8 @@
    oklch() all work. There are no animations; prefers-reduced-motion has nothing
    to turn off. */
 
-import { fmtNum, fmtPct, fmtVolume, priceDecimals } from './format.js';
+import { fmtNum, fmtPct, fmtVolume, priceDecimals, priceKind } from './format.js';
+import { marketForSymbol } from './session.js';
 import { hexA, toRGB } from './viz.js';
 import { INDICATORS, computeIndicator, heikinAshi, barSpacing } from './indicators.js';
 
@@ -77,6 +78,9 @@ export function createChart(container, opts = {}) {
   /* ---- state -------------------------------------------------------------- */
   let bars = [], disp = [], spacing = DAY;
   let meta = { symbol: '', currency: 'USD', interval: '1d', isDemo: false, source: '' };
+  // Stocks print in cents above $1; FX and coins keep the magnitude rule.
+  // setData may name the kind; otherwise it follows from the symbol.
+  const pdOf = (v) => priceDecimals(v, meta.kind);
   let type = 'candle', logScale = false, showVolume = true, pctMode = false;
   let readOnly = !!opts.readOnly;
   let specs = [];          // [{id, params, color}]
@@ -257,11 +261,11 @@ export function createChart(container, opts = {}) {
     // Axis width: measured from the widest label this frame will print.
     ctx.font = '11px ' + T.font;
     const ref = disp.length ? disp[disp.length - 1].c : 100;
-    let widest = ctx.measureText(isPct() ? '+888.88%' : fmtNum(ref * 1.1, priceDecimals(ref))).width;
-    widest = Math.max(widest, ctx.measureText(isPct() ? '−88.88%' : fmtNum(ref * 0.9, priceDecimals(ref))).width);
+    let widest = ctx.measureText(isPct() ? '+888.88%' : fmtNum(ref * 1.1, pdOf(ref))).width;
+    widest = Math.max(widest, ctx.measureText(isPct() ? '−88.88%' : fmtNum(ref * 0.9, pdOf(ref))).width);
     if (sub.length) widest = Math.max(widest, ctx.measureText('−888.88M').width);
     // Room for an off-range level tag ('▼ 190.05'), the widest thing the axis prints.
-    if (levels.length) widest = Math.max(widest, ctx.measureText('▼ ' + (isPct() ? '−88.88%' : fmtNum(ref * 0.9, priceDecimals(ref)))).width);
+    if (levels.length) widest = Math.max(widest, ctx.measureText('▼ ' + (isPct() ? '−88.88%' : fmtNum(ref * 0.9, pdOf(ref)))).width);
     const axisW = clamp(Math.ceil(widest) + 18, 52, Math.max(52, W * 0.32));
     const plotR = Math.max(10, W - axisW);
     const avail = Math.max(40, H - AXIS_H);
@@ -382,12 +386,12 @@ export function createChart(container, opts = {}) {
 
   /* ---- value formatting -------------------------------------------------------- */
   const refPrice = () => (disp.length ? disp[disp.length - 1].c : 1);
-  const fmtP = (v) => (fin(v) ? fmtNum(v, priceDecimals(Math.abs(refPrice()) || v)) : '—');
+  const fmtP = (v) => (fin(v) ? fmtNum(v, pdOf(Math.abs(refPrice()) || v)) : '—');
   // Price-axis label: the instrument's precision, trimmed to what the tick step
   // needs ('0.50', not '0.5000') but never below two places for prices under
   // 1,000, which is how every quote elsewhere in the app reads.
   function fmtAxisPrice(v, step) {
-    const ref = Math.abs(refPrice()) || Math.abs(v) || 1, pd = priceDecimals(ref);
+    const ref = Math.abs(refPrice()) || Math.abs(v) || 1, pd = pdOf(ref);
     let need = 0;
     while (need < 8 && Math.abs(Math.round(step * Math.pow(10, need)) - step * Math.pow(10, need)) > 1e-6) need++;
     const d = Math.max(Math.min(need, pd), ref >= 1000 ? 0 : Math.min(2, pd));
@@ -1139,10 +1143,10 @@ export function createChart(container, opts = {}) {
         setText(ref.meta, [i18nT(INTERVAL_LABEL[meta.interval] || meta.interval || ''), meta.source].filter(Boolean).join(' · '));
         const b = bars[idx];
         const prevC = idx > 0 && bars[idx - 1] ? bars[idx - 1].c : b ? b.o : null;
-        for (const k of ['O', 'H', 'L', 'C']) setText(ref.ohlc[k], b ? fmtNum(b[k.toLowerCase()], priceDecimals(b.c)) : '—');
+        for (const k of ['O', 'H', 'L', 'C']) setText(ref.ohlc[k], b ? fmtNum(b[k.toLowerCase()], pdOf(b.c)) : '—');
         if (b && fin(prevC) && prevC) {
           const ch = b.c - prevC;
-          setText(ref.chg, (ch >= 0 ? '+' : '−') + fmtNum(Math.abs(ch), priceDecimals(b.c)) + ' (' + fmtPct((ch / prevC) * 100) + ')');
+          setText(ref.chg, (ch >= 0 ? '+' : '−') + fmtNum(Math.abs(ch), pdOf(b.c)) + ' (' + fmtPct((ch / prevC) * 100) + ')');
           ref.chg.dataset.dir = ch > 0 ? 'up' : ch < 0 ? 'down' : 'flat';
         } else setText(ref.chg, '');
         const hv = b && fin(b.v);
@@ -1219,8 +1223,8 @@ export function createChart(container, opts = {}) {
     const parts = [
       (meta.symbol || '') + ' ' + i18nT(INTERVAL_LABEL[meta.interval] || '') + ' ' + i18nT('chart') + ':',
       n + ' ' + i18nT('bars from') + ' ' + d(a.t) + ' ' + i18nT('to') + ' ' + d(b.t) + '.',
-      i18nT('Last') + ' ' + fmtNum(b.c, priceDecimals(b.c)) + ', ' + fmtPct(ch) + ' ' + i18nT('over the period') + '.',
-      i18nT('Range') + ' ' + fmtNum(lo, priceDecimals(lo)) + '–' + fmtNum(hi, priceDecimals(hi)) + '.',
+      i18nT('Last') + ' ' + fmtNum(b.c, pdOf(b.c)) + ', ' + fmtPct(ch) + ' ' + i18nT('over the period') + '.',
+      i18nT('Range') + ' ' + fmtNum(lo, pdOf(lo)) + '–' + fmtNum(hi, pdOf(hi)) + '.',
     ];
     if (meta.isDemo) parts.push(i18nT('Demo data, not market prices.'));
     canvas.setAttribute('aria-label', parts.join(' '));
@@ -1663,6 +1667,7 @@ export function createChart(container, opts = {}) {
       meta = { symbol: d.symbol || '', currency: d.currency || 'USD', interval: d.interval || '1d', isDemo: !!d.isDemo, source: d.source || '',
         // Provenance flags from market.candles(): shown as chips, never hidden.
         stale: !!d.stale, partial: !!d.partial, note: d.note ? String(d.note) : '', feed: d.feed || null, delayed: d.delayed || null };
+      try { meta.kind = d.kind || (meta.symbol ? priceKind(marketForSymbol(meta.symbol)) : undefined); } catch { meta.kind = undefined; }
       spacing = barSpacing(bars) || INTERVAL_MS[meta.interval] || DAY;
       disp = type === 'heikin' ? heikinAshi(bars) : bars;
       recompute();

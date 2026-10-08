@@ -18,7 +18,7 @@
    thereafter only their cell contents change; the <tr> nodes are re-parented, not
    recreated, when a sort reorders them. */
 
-import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtCap, fmtTime, fmtAge } from './format.js';
+import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtCap, fmtTime, fmtAge, priceKind } from './format.js';
 import { sessionAt, marketForSymbol } from './session.js';
 import { helpIcon } from './learn.js';
 
@@ -75,7 +75,7 @@ const COL_DEFS = [
     id: 'last', label: 'Last', desc: 'Most recent price the provider reported.',
     num: true, width: '11ch', amount: true,
     sort: (r) => q(r, 'price'),
-    text: (r) => (r.uncovered ? 'Not covered' : r.q ? fmtPrice(r.q.price, r.q.currency, { fx: r.fx }) : '—'),
+    text: (r) => (r.uncovered ? 'Not covered' : r.q ? fmtPrice(r.q.price, r.q.currency, { fx: r.fx, kind: r.kind }) : '—'),
     title: (r) => (r.uncovered
       ? 'The provider handling this symbol returned no quote for it.'
       : r.q ? 'As of ' + fmtTime(r.q.ts) + ' · ' + r.q.source : ''),
@@ -89,7 +89,7 @@ const COL_DEFS = [
     sort: (r) => q(r, 'change'),
     // The move is printed at the PRICE's precision. Two decimals turned every
     // move on a sub-dollar coin into "0.00" beside a non-zero percentage.
-    text: (r) => (r.q ? fmtMove(r.q.change, r.q.price) : '—'),
+    text: (r) => (r.q ? fmtMove(r.q.change, r.q.price, r) : '—'),
     tone: (r) => q(r, 'change'),
   },
   {
@@ -106,25 +106,25 @@ const COL_DEFS = [
     // Bare figures, not fmtPrice: the currency is already stated once per row in
     // Last, and repeating "$" down five columns costs width and buys nothing.
     // fmtMove is exactly "this number at that price's precision".
-    text: (r) => (r.q ? fmtMove(r.q.open, r.q.price) : '—'),
+    text: (r) => (r.q ? fmtMove(r.q.open, r.q.price, r) : '—'),
   },
   {
     id: 'high', label: 'High', desc: 'Session high, where the provider reports one.',
     num: true, width: '9ch', amount: true,
     sort: (r) => q(r, 'high'),
-    text: (r) => (r.q ? fmtMove(r.q.high, r.q.price) : '—'),
+    text: (r) => (r.q ? fmtMove(r.q.high, r.q.price, r) : '—'),
   },
   {
     id: 'low', label: 'Low', desc: 'Session low, where the provider reports one.',
     num: true, width: '9ch', amount: true,
     sort: (r) => q(r, 'low'),
-    text: (r) => (r.q ? fmtMove(r.q.low, r.q.price) : '—'),
+    text: (r) => (r.q ? fmtMove(r.q.low, r.q.price, r) : '—'),
   },
   {
     id: 'prevclose', label: 'Prev close', desc: 'The reference the change is measured against.',
     num: true, width: '10ch', amount: true,
     sort: (r) => q(r, 'prevClose'),
-    text: (r) => (r.q ? fmtMove(r.q.prevClose, r.q.price) : '—'),
+    text: (r) => (r.q ? fmtMove(r.q.prevClose, r.q.price, r) : '—'),
   },
   {
     id: 'range', label: 'Range', desc: 'Where Last sits between Low and High.',
@@ -147,8 +147,8 @@ const COL_DEFS = [
       const left = have ? r.rng + '%' : '0%';
       if (refs.mark.style.left !== left) refs.mark.style.left = left;
       setAttr(td, 'title', have
-        ? 'Last is ' + fmtNum(r.rng, 0) + '% of the way from ' + fmtMove(r.q.low, r.q.price)
-          + ' to ' + fmtMove(r.q.high, r.q.price)
+        ? 'Last is ' + fmtNum(r.rng, 0) + '% of the way from ' + fmtMove(r.q.low, r.q.price, r)
+          + ' to ' + fmtMove(r.q.high, r.q.price, r)
         : 'No high/low reported for this symbol.');
     },
   },
@@ -569,6 +569,7 @@ function rowModel(sym, ctx, threshold) {
   return {
     sym, q: quote, prof, mkt, sess, frozen, rng,
     fx: mkt === 'FX',
+    kind: priceKind(mkt),
     stale: frozen > threshold,
     uncovered: !quote && ctx.uncovered.has(sym),
     basis: basisOf(quote, mkt),
