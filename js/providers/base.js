@@ -128,22 +128,260 @@ export const budget = {
   off(cb) { budgetListeners.delete(cb); },
 };
 
-// Small helper: fetch JSON with a timeout, throwing a typed error on HTTP 429 so
-// the scheduler can back off. `provider` is the budget attribution — every
-// adapter passes its own id.
-export async function getJSON(url, { timeoutMs = 9000, headers, provider } = {}) {
-  budget.record(provider);
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { headers, cache: 'no-store', signal: ctrl.signal });
-    if (res.status === 429) { const e = new Error('rate-limited'); e.rateLimited = true; throw e; }
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.json();
-  } finally { clearTimeout(t); }
+/* ---- Normalized bar -------------------------------------------------------
+   { t: epoch ms (bar OPEN; daily+ = 00:00 UTC of the trading date, see
+   candles.js), o, h, l, c, v: number|null }. A bar that cannot be drawn
+   honestly is dropped rather than repaired: non-finite prices, a non-positive
+   price, or a high/low that does not contain the open and close. Repairing it
+   (clamping h up to c) would invent a print nobody made. Volume is null — never
+   0 — when the feed has none (spot FX, CoinGecko OHLC), so a chart can tell
+   "no volume data" from "nothing traded". */
+
+export function normBar(b) {
+  if (!b) return null;
+  const t = typeof b.t === 'number' ? b.t : (b.t != null ? Date.parse(b.t) : NaN);
+  const o = num(b.o), h = num(b.h), l = num(b.l), c = num(b.c);
+  if (!Number.isFinite(t) || o == null || h == null || l == null || c == null) return null;
+  if (o <= 0 || h <= 0 || l <= 0 || c <= 0) return null;
+  // A hair of tolerance: some feeds round h/l and o/c to different precisions.
+  const eps = Math.max(h, 1e-12) * 1e-9;
+  if (h + eps < Math.max(o, c) || l - eps > Math.min(o, c) || l > h) return null;
+  const v = num(b.v);
+  return { t, o, h, l, c, v: v == null || v < 0 ? null : v };
 }
 
-// Provider registry. Each provider is { id, label, needsKey, quote, series, profile, search, marketStatus }.
+// Normalize, drop invalid, sort oldest-first and de-duplicate on t (the LAST
+// occurrence wins — upstream pagination overlaps repeat the bar with fresher data).
+export function normBars(arr) {
+  if (!Array.isArray(arr)) return [];
+  const byT = new Map();
+  for (const raw of arr) { const b = normBar(raw); if (b) byT.set(b.t, b); }
+  return [...byT.values()].sort((a, b) => a.t - b.t);
+}
+
+/* ---- Typed errors -----------------------------------------------------------
+   One vocabulary for every adapter and the facade, so the UI can say "your key
+   was rejected" instead of "no data":
+     rateLimited  HTTP 429, a throttle body, or the local pacer refusing to queue
+     authError    HTTP 401, or a body that says the key is invalid
+     premium      the endpoint exists but not on the free plan (HTTP 402/403, or
+                  a body saying so) — permanent for this key, not worth retrying
+     timeout      our own abort fired
+     network      fetch threw (offline, DNS, CORS)
+   `daily` is set on rateLimited when it is the per-DAY cap that is spent. */
+
+export function apiError(kind, message, extra) {
+  const e = new Error(message || kind);
+  e.kind = kind;
+  e[kind] = true;
+  if (extra) Object.assign(e, extra);
+  return e;
+}
+export function errorKind(e) {
+  if (!e) return null;
+  return e.kind || (e.rateLimited ? 'rateLimited' : e.authError ? 'authError' : e.premium ? 'premium' : e.timeout ? 'timeout' : e.network ? 'network' : 'error');
+}
+
+/* ---- Published free-tier limits + pacing -----------------------------------
+   The figures each vendor publishes for its FREE tier (late 2025). They are the
+   pacer's ceiling, not a promise: vendors change them, and a paid key simply
+   never hits the pacer's wait. perSec guards burst limits that are separate
+   from the minute cap (Finnhub's 30/s). Daily counts reset at 00:00 UTC, which
+   is what Twelve Data and Alpha Vantage use. */
+
+export const LIMITS = {
+  finnhub: { perMin: 60, perSec: 25, perDay: null, note: '60 calls/minute' },
+  twelvedata: { perMin: 8, perDay: 800, note: '8 credits/minute, 800/day (a batched quote costs one credit per symbol)' },
+  polygon: { perMin: 5, perDay: null, note: '5 calls/minute, end-of-day / delayed data' },
+  alpaca: { perMin: 200, perDay: null, note: '200 calls/minute, IEX feed' },
+  alphavantage: { perMin: 5, perDay: 25, note: '25 calls/day' },
+  coingecko: { perMin: 10, perDay: null, note: '~10 calls/minute without a key (shared, varies)' },
+  demo: { perMin: null, perDay: null, note: 'Bundled sample data — no network' },
+};
+
+/* Per-provider pacer. A queue per provider; a request leaves the queue only when
+   the trailing-minute count (and the trailing-second count, and today's count)
+   is under the limit. Higher `priority` leaves first (visible chart > armed
+   alerts > screener > sparklines), FIFO within a priority. A request whose
+   projected wait exceeds its maxWait is rejected as rateLimited rather than
+   parked for minutes: a stale sparkline is better skipped than delivered late.
+   Time and timers are injectable so the logic is testable without a clock. */
+
+export function createPacer({ limits = LIMITS, now = () => Date.now(), setTimer = (fn, ms) => setTimeout(fn, ms), persist = null } = {}) {
+  const state = new Map();   // id -> { min: [t], sec: [t], day, dayKey, queue: [], timer, cooldownUntil }
+  const dayKeyOf = (t) => new Date(t).toISOString().slice(0, 10);
+  const saved = persist ? persist.load() : null;
+
+  function st(id) {
+    let s = state.get(id);
+    if (!s) {
+      const dk = dayKeyOf(now());
+      const day = saved && saved.day === dk && saved.by && Number.isFinite(saved.by[id]) ? saved.by[id] : 0;
+      s = { min: [], sec: [], day, dayKey: dk, queue: [], timer: null, cooldownUntil: 0, seq: 0 };
+      state.set(id, s);
+    }
+    const dk = dayKeyOf(now());
+    if (s.dayKey !== dk) { s.dayKey = dk; s.day = 0; }
+    return s;
+  }
+
+  // ms until the next slot opens for this provider (0 = now, Infinity = not today).
+  function waitFor(id, cost = 1) {
+    const L = limits[id] || {};
+    const s = st(id);
+    const t = now();
+    while (s.min.length && s.min[0] <= t - 60000) s.min.shift();
+    while (s.sec.length && s.sec[0] <= t - 1000) s.sec.shift();
+    if (L.perDay && s.day >= L.perDay) return Infinity;
+    let w = Math.max(0, s.cooldownUntil - t);
+    // A request costing more credits than a whole minute holds (a 20-symbol
+    // Twelve Data batch on an 8/min plan) waits for an empty minute, then goes.
+    const c = L.perMin ? Math.min(cost, L.perMin) : cost;
+    if (L.perMin && s.min.length + c > L.perMin) w = Math.max(w, s.min[s.min.length - (L.perMin - c) - 1] + 60000 - t);
+    if (L.perSec && s.sec.length >= L.perSec) w = Math.max(w, s.sec[s.sec.length - L.perSec] + 1000 - t);
+    return w;
+  }
+
+  function take(id, cost = 1) {
+    const s = st(id); const t = now();
+    for (let i = 0; i < cost; i++) s.min.push(t);
+    s.sec.push(t); s.day += cost;
+    if (persist) persist.save(snapshotDay());
+  }
+
+  function snapshotDay() {
+    const dk = dayKeyOf(now()); const by = {};
+    for (const [id, s] of state) if (s.dayKey === dk) by[id] = s.day;
+    return { day: dk, by };
+  }
+
+  function pump(id) {
+    const s = st(id);
+    if (s.timer) return;
+    while (s.queue.length) {
+      s.queue.sort((a, b) => (b.priority - a.priority) || (a.seq - b.seq));
+      const w = waitFor(id, s.queue[0].cost);
+      if (w === Infinity) {
+        // Daily cap spent: everything queued fails now; nothing frees up before midnight UTC.
+        for (const job of s.queue.splice(0)) job.reject(apiError('rateLimited', id + ' daily limit reached', { daily: true, provider: id }));
+        return;
+      }
+      if (w > 0) {
+        // Drop the jobs that would wait past their own patience, then sleep.
+        const keep = [];
+        for (const job of s.queue) { if (now() + w - job.queuedAt > job.maxWait) job.reject(apiError('rateLimited', id + ' is paced — try again shortly', { queued: true, provider: id, retryInMs: w })); else keep.push(job); }
+        s.queue = keep;
+        if (!s.queue.length) return;
+        s.timer = setTimer(() => { s.timer = null; pump(id); }, w + 5);
+        return;
+      }
+      const job = s.queue.shift();
+      take(id, job.cost);
+      job.resolve();
+    }
+  }
+
+  return {
+    // Resolves when a slot is granted (the caller then fires the request).
+    acquire(id, { priority = 1, maxWait = 30000, cost = 1 } = {}) {
+      const L = limits[id];
+      if (!L || (!L.perMin && !L.perDay && !L.perSec)) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const s = st(id);
+        s.queue.push({ resolve, reject, priority, maxWait, cost: Math.max(1, cost | 0), queuedAt: now(), seq: s.seq++ });
+        pump(id);
+      });
+    },
+    // A 429 from upstream: stop sending to this provider for a while.
+    penalize(id, ms = 60000) { const s = st(id); s.cooldownUntil = Math.max(s.cooldownUntil, now() + ms); },
+    // Estimated ms before `n` more calls could complete on this provider.
+    forecast(id, n = 1) {
+      const L = limits[id] || {};
+      const s = st(id);
+      if (L.perDay && s.day + n > L.perDay) return Infinity;
+      if (!L.perMin) return 0;
+      const ahead = s.queue.length + n;
+      const free = Math.max(0, L.perMin - s.min.length);
+      if (ahead <= free) return Math.max(0, s.cooldownUntil - now());
+      return Math.ceil((ahead - free) / L.perMin) * 60000;
+    },
+    usage(id) {
+      const s = st(id); waitFor(id);
+      return { usedMin: s.min.length, usedDay: s.day, queued: s.queue.length, cooldownUntil: s.cooldownUntil > now() ? s.cooldownUntil : null };
+    },
+  };
+}
+
+// Daily counters survive a reload: otherwise a reload resets Alpha Vantage's
+// 25/day to zero in our books while the vendor keeps counting.
+const QUOTA_KEY = 'stk_quota';
+const quotaPersist = {
+  load() { try { return typeof localStorage !== 'undefined' ? JSON.parse(localStorage.getItem(QUOTA_KEY) || 'null') : null; } catch (e) { return null; } },
+  _t: null, _v: null,
+  save(v) {
+    this._v = v;
+    if (this._t || typeof setTimeout !== 'function') return;
+    this._t = setTimeout(() => {
+      this._t = null;
+      try { if (typeof localStorage !== 'undefined') localStorage.setItem(QUOTA_KEY, JSON.stringify(this._v)); } catch (e) { /* quota: counters stay in memory */ }
+    }, 2000);
+    if (this._t && typeof this._t.unref === 'function') this._t.unref();
+  },
+};
+
+export const pacer = createPacer({ persist: quotaPersist });
+
+/* ---- getJSON ---------------------------------------------------------------
+   Fetch JSON with a timeout through the provider's pacer. Concurrent requests
+   for the same URL share one fetch (a chart and a screener asking for the same
+   daily bars in the same tick cost one credit). Options:
+     provider   budget + pacing attribution — every adapter passes its own id
+     priority   0 background · 1 normal (default) · 2 interactive/visible
+     maxWait    ms the request may sit in the pacer queue before failing
+     text       resolve the body as text (Alpha Vantage's CSV calendar)
+     cost       credits the call spends (Twelve Data bills a batch per symbol)
+   Errors are typed (see apiError). */
+
+const inflight = new Map();
+
+export function getJSON(url, { timeoutMs = 9000, headers, provider, priority = 1, maxWait = 30000, text = false, cost = 1 } = {}) {
+  const key = (text ? 'T ' : 'J ') + url + (headers ? ' ' + JSON.stringify(headers) : '');
+  if (inflight.has(key)) return inflight.get(key);
+  const p = (async () => {
+    await pacer.acquire(provider, { priority, maxWait, cost });
+    budget.record(provider);
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    let timedOut = false;
+    const t = setTimeout(() => { timedOut = true; if (ctrl) ctrl.abort(); }, timeoutMs);
+    try {
+      let res;
+      try { res = await fetch(url, { headers, cache: 'no-store', signal: ctrl ? ctrl.signal : undefined }); }
+      catch (e) {
+        if (timedOut) throw apiError('timeout', 'Request timed out', { provider });
+        throw apiError('network', 'Network error' + (e && e.message ? ': ' + e.message : ''), { provider });
+      }
+      if (res.status === 429) {
+        const ra = Number(res.headers && res.headers.get && res.headers.get('retry-after'));
+        pacer.penalize(provider, Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60000);
+        throw apiError('rateLimited', 'rate-limited', { provider });
+      }
+      if (res.status === 401) throw apiError('authError', 'API key rejected', { provider, status: 401 });
+      if (res.status === 402 || res.status === 403) throw apiError('premium', 'Not available on this plan (HTTP ' + res.status + ')', { provider, status: res.status });
+      if (!res.ok) throw apiError('error', 'HTTP ' + res.status, { provider, status: res.status });
+      try { return text ? await res.text() : await res.json(); }
+      catch (e) { if (timedOut) throw apiError('timeout', 'Request timed out', { provider }); throw apiError('error', 'Unreadable response', { provider }); }
+    } finally { clearTimeout(t); }
+  })();
+  inflight.set(key, p);
+  // Cleared on settle either way; a failure must not be replayed to the next caller.
+  p.then(() => inflight.delete(key), () => inflight.delete(key));
+  return p;
+}
+
+// Provider registry. Each provider is { id, label, needsKey, classes, quote,
+// profile?, search, marketStatus, validate?, candles?, candleIntervals?,
+// fundamentals?, news?, events?, calendar? } — every optional method is checked
+// with typeof before the facade calls it.
 const REGISTRY = new Map();
 export function register(p) { REGISTRY.set(p.id, p); }
 export function get(id) { return REGISTRY.get(id); }

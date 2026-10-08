@@ -1,0 +1,7 @@
+Fecha,Emisora,Serie,Operación,Títulos,Precio,Importe,Comisión,IVA
+16/01/2024,WALMEX,*,Compra,100,65.50,-6560.25,8.84,1.41
+15/02/2024,AMX,B,Compra,200,16.10,-3225.10,4.40,0.70
+20/02/2024,WALMEX,*,Dividendo,,,150.00,,
+21/02/2024,WALMEX,*,Retención ISR,,,-15.00,,
+01/03/2024,WALMEX,*,Venta,50,70.00,3487.61,10.68,1.71
+05/03/2024,,,Depósito,,,10000.00,,

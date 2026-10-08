@@ -8,11 +8,17 @@
    overwrite your own), and a full quota is recorded and recovered from instead of
    being swallowed — the old code lost API keys silently once the caches filled. */
 
+import { ALERT_TYPES, ALERT_OPS, PORTFOLIO_SYMBOL } from './alerttypes.js';
+
 const K = {
   settings: 'stk_settings',
   watchlist: 'stk_watchlist',
   rules: 'stk_rules',
-  holdings: 'stk_holdings',
+  holdings: 'stk_holdings',     // DEPRECATED since schema v3 — superseded by stk_ledger; still read and written for the old UI
+  ledger: 'stk_ledger',         // Txn[] — the portfolio's source of truth from v3 on
+  drawings: 'stk_drawings',     // { SYM: Drawing[] } — chart annotations, per symbol not per widget
+  targets: 'stk_targets',       // { key: pct } — allocation targets
+  learn: 'stk_learn',           // { seen: string[], tourDone: bool } — education progress
   profiles: 'stk_profiles',
   series: 'stk_series',
   alertlog: 'stk_alertlog',
@@ -20,6 +26,9 @@ const K = {
   workspaces: 'stk_workspaces',
   schema: 'stk_schema',
   lastframe: 'stk_lastframe',   // written by peers.js only; listed so it is swept and measured here
+  candles: 'stk_candles',       // OHLCV cache, written by providers only; listed so reclaim/clearAll/measure see it
+  meta: 'stk_meta',             // provider-side cache (fundamentals/news/events); same arrangement as candles
+  quota: 'stk_quota',           // per-provider call counters, written by providers/base.js; listed so Erase all clears it
 };
 
 const DEFAULT_SETTINGS = {
@@ -38,7 +47,21 @@ const DEFAULT_SETTINGS = {
   privacy: false,          // blur monetary amounts
   showMarket: true,        // market-status strip
   ack: false,              // one-time disclaimer acknowledged
+  // Experience level gates how much of the UI is offered, never what data is
+  // kept. The DEFAULT here is for a brand-new browser; an existing user is given
+  // 'standard' on first load after the upgrade (see initialLevel) so nothing they
+  // already rely on vanishes behind a beginner view.
+  level: 'beginner',       // 'beginner' | 'standard' | 'pro'
+  baseCurrency: 'USD',     // portfolio totals are converted into this
+  costMethod: 'fifo',      // 'fifo' | 'avg' — how sells consume lots
+  chartDefaults: { type: 'candle', volume: true, indicators: [] },
 };
+
+export const LEVELS = ['beginner', 'standard', 'pro'];
+export const COST_METHODS = ['fifo', 'avg'];
+export const CHART_TYPES = ['candle', 'ohlc', 'heikin', 'line', 'area', 'baseline'];
+export const TXN_TYPES = ['buy', 'sell', 'dividend', 'fee', 'split', 'deposit', 'withdraw', 'interest', 'tax'];
+export { PORTFOLIO_SYMBOL };
 
 const DEMO_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'SPY', 'AMD'];
 
@@ -47,7 +70,7 @@ const DEMO_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'SPY', 
 // as listing all three: [] also covers 'closed' and 'weekend'.
 export const SESSIONS = ['pre', 'open', 'post'];
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 // A shared link seeds the watchlist and nothing else, so only the document state
 // is frozen while it is active. Settings stay writable on purpose: a visitor who
@@ -57,7 +80,11 @@ export const SCHEMA_VERSION = 2;
 // shared view is someone else's symbols, and dragging a widget around while
 // looking at it must not quietly rewrite the arrangement you will come back to.
 // exitHash() puts the pre-link layout back in memory as well as on disk.
-const HASH_FROZEN = new Set([K.watchlist, K.rules, K.holdings, K.alertlog, K.profiles, K.series, K.workspaces]);
+// The ledger, drawings and allocation targets are the visitor's own records and
+// are frozen for the same reason. Learning progress is not: like settings, it is
+// about the person, not the document they are looking at.
+const HASH_FROZEN = new Set([K.watchlist, K.rules, K.holdings, K.alertlog, K.profiles, K.series, K.workspaces,
+  K.ledger, K.drawings, K.targets]);
 
 // The market strip fetches these whatever the watchlist says, so eviction must
 // not treat them as orphans.
@@ -65,6 +92,17 @@ const PINNED_SYMBOLS = ['SPY', 'QQQ', 'DIA'];
 
 const SERIES_TTL_MS = 3 * 24 * 3600 * 1000;  // survives a weekend gap so Monday still paints a sparkline
 const PROFILE_CAP = 200;
+const LEDGER_CAP = 20000;                    // a decade of an active account; beyond that it is a broker export
+const DRAWINGS_PER_SYMBOL = 50;
+const DRAWING_SYMBOLS_CAP = 500;
+const NOTE_MAX = 500;
+// Validator tables. Declared up here, not beside the validators, because the
+// store object below runs them while the module is still initialising.
+const RULE_KNOWN = new Set(['id', 'symbol', 'type', 'op', 'value', 'armed', 'sessions', 'note', 'confirm',
+  'params', 'repeat', 'expires', 'created', 'unsupported', 'disarmedBy']);
+const DISARMED_BY = new Set(['expired', 'fired', 'unsupported']);
+const CCY_RE = /^[A-Z0-9]{2,10}$/;
+const DRAWING_TYPES = /^[a-z][a-zA-Z0-9-]{0,23}$/;
 const HASH_SYMBOL_CAP = 60;                  // a link is not a licence to open 5,000 subscriptions
 
 /* ---- workspace bounds ------------------------------------------------------
@@ -83,11 +121,13 @@ const WS_MAX_ROW = 200;
 const WS_MAX_TABS = 40;
 const WS_MAX_WIDGETS = 120;                  // per tab
 const WS_NAME_MAX = 40;
-const WS_STATE_MAX = 4000;                   // JSON chars of one widget's own saved state
+const WS_STATE_MAX = 16000;                  // JSON chars of one widget's own saved state (the notes widget is the big one)
 
 // The kinds widgets.js ships today. Exported for callers that want to offer a
 // choice; deliberately NOT used to filter stored layouts — see validWidget().
-export const WIDGET_KINDS = ['table', 'cards', 'chart', 'quote', 'portfolio', 'tape', 'alerts', 'session'];
+export const WIDGET_KINDS = ['table', 'cards', 'chart', 'quote', 'portfolio', 'tape', 'alerts', 'session',
+  'screener', 'heatmap', 'news', 'calendar', 'fundamentals', 'allocation', 'performance', 'calculator',
+  'glossary', 'learn', 'compare', 'movers', 'notes', 'income'];
 
 let quotaHit = false;          // sticky for the session: one silent failure is the whole bug
 let lastError = null;
@@ -127,22 +167,36 @@ function lsSet(key, val) {
 function reclaim() {
   store.series = {};
   store.profiles = {};
-  for (const key of [K.series, K.profiles, K.lastframe]) {
+  for (const key of [K.series, K.profiles, K.lastframe, K.candles, K.meta]) {
     try { localStorage.removeItem(key); } catch (e) { /* nothing left to try */ }
   }
 }
 
-function mintId(prefix) { return prefix + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36); }
+// The one id minter. app.js used to build rule ids its own way ('r' + ms +
+// rand); anything new should call this so every id has the same shape.
+export function mintId(prefix) { return prefix + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36); }
 
 function clone(v, fallback) {
   try { return JSON.parse(JSON.stringify(v)); } catch (e) { return fallback; }
 }
 
+const bootSettings = asObject(lsGet(K.settings, {}));
+const bootRules = asArray(lsGet(K.rules, []));
+const bootHoldings = asArray(lsGet(K.holdings, []));
+const bootWatchlist = lsGet(K.watchlist, null);
+
 export const store = {
-  settings: { ...DEFAULT_SETTINGS, ...lsGet(K.settings, {}) },
-  watchlist: lsGet(K.watchlist, null),
-  rules: asArray(lsGet(K.rules, [])),
-  holdings: asArray(lsGet(K.holdings, [])),
+  settings: shapeSettings(bootSettings, initialLevel(bootSettings, bootWatchlist, bootRules, bootHoldings)),
+  watchlist: bootWatchlist,
+  rules: bootRules,
+  // DEPRECATED (schema v3): the ledger below is the portfolio's source of truth.
+  // Kept readable and writable so the current holdings editor keeps working until
+  // the portfolio UI moves over; the v3 migration copied it into the ledger once.
+  holdings: bootHoldings,
+  ledger: shapeLedger(lsGet(K.ledger, [])),
+  drawings: shapeDrawings(lsGet(K.drawings, {})),
+  targets: shapeTargets(lsGet(K.targets, {})),
+  learn: shapeLearn(lsGet(K.learn, null)),
   profiles: asObject(lsGet(K.profiles, {})),
   series: asObject(lsGet(K.series, {})),
   alertlog: asArray(lsGet(K.alertlog, [])),
@@ -163,6 +217,10 @@ export const store = {
   saveSeries() { return lsSet(K.series, this.series); },
   saveAlertlog() { return lsSet(K.alertlog, this.alertlog.slice(-100)); },
   savePopouts() { return lsSet(K.popouts, this.popouts); },
+  saveLedger() { return lsSet(K.ledger, this.ledger); },
+  saveDrawings() { return lsSet(K.drawings, this.drawings); },
+  saveTargets() { return lsSet(K.targets, this.targets); },
+  saveLearn() { return lsSet(K.learn, this.learn); },
 
   // Shaped on the way out as well as in. workspace.js edits the live object in
   // place during a drag, so this is the only place the bytes are checked before
@@ -202,6 +260,13 @@ export const store = {
         rules: clone(this.rules, []),
         holdings: clone(this.holdings, []),
         alertlog: clone(this.alertlog, []),
+        ledger: clone(this.ledger, []),
+        drawings: clone(this.drawings, {}),
+        targets: clone(this.targets, {}),
+        // The caches are frozen too, so whatever the link view fetches lives in
+        // memory only; leaving it must put the user's own caches back.
+        profiles: clone(this.profiles, {}),
+        series: clone(this.series, {}),
         // Snapshotted before workspace.js has run, so this is what is on disk.
         // wsPersisted distinguishes "the user has a saved layout" from "the
         // default was seeded during this link view and has never been written".
@@ -223,6 +288,7 @@ export const store = {
     hashSnapshot = null;
     this.saveWatchlist(); this.saveRules(); this.saveHoldings();
     this.saveAlertlog(); this.saveProfiles(); this.saveSeries();
+    this.saveLedger(); this.saveDrawings(); this.saveTargets();
     // Not the sharer's layout — the link carries symbols only — but the one this
     // browser was refused permission to write while the link was open.
     this.saveWorkspaces();
@@ -242,6 +308,11 @@ export const store = {
       this.rules = snap.rules;
       this.holdings = snap.holdings;
       this.alertlog = snap.alertlog;
+      this.ledger = snap.ledger;
+      this.drawings = snap.drawings;
+      this.targets = snap.targets;
+      this.profiles = snap.profiles;
+      this.series = snap.series;
       if (!snap.persisted) this.saveWatchlist();
       // Any dragging done under the link was never written; put the saved layout
       // back in memory too, so the two agree without a reload. If there was no
@@ -261,6 +332,10 @@ export const store = {
     if (!sym || this.watchlist.includes(sym)) return false;
     this.watchlist.push(sym); this.saveWatchlist(); return true;
   },
+  // Removing a symbol from the WATCHLIST drops its alert rules (they watch the
+  // list) but deliberately keeps holdings, ledger entries and drawings: those are
+  // records of what you own and what you marked, and un-watching a ticker is not
+  // a request to forget that you bought it.
   removeSymbol(sym) {
     if (!Array.isArray(this.watchlist)) return;
     this.watchlist = this.watchlist.filter((s) => s !== sym); this.saveWatchlist();
@@ -278,7 +353,11 @@ export const store = {
   rulesFor(sym) { return this.rules.filter((r) => r.symbol === sym); },
   addRule(rule) {
     const r = { ...rule };
-    if (!r.id) r.id = mintId('r');
+    if (!r.id || this.rules.some((x) => x.id === r.id)) r.id = mintId('r');
+    if (!r.type) r.type = 'price';
+    if (r.repeat !== 'once') r.repeat = 'rearm';
+    if (!isDay(r.expires)) r.expires = null;
+    if (!Number.isFinite(Number(r.created))) r.created = Date.now();
     // New rules watch regular hours only. Rules that predate the field watch every
     // session (see the v2 migration) and are never narrowed retroactively.
     r.sessions = Array.isArray(r.sessions) ? normalizeSessions(r.sessions) : ['open'];
@@ -286,7 +365,18 @@ export const store = {
   },
   updateRule(id, patch) {
     const r = this.rules.find((x) => x.id === id); if (!r) return null;
-    Object.assign(r, patch);
+    const p = patch && typeof patch === 'object' ? patch : {};
+    // Re-arming, or changing what the rule measures, starts it over: a trailing
+    // peak, a half-built cross or a latch from the old condition is not evidence
+    // about the new one.
+    const rearm = p.armed === true && !r.armed;
+    const redefined = ['type', 'op', 'value', 'params', 'symbol'].some((k) => k in p && p[k] !== r[k]);
+    Object.assign(r, p);
+    if (rearm || redefined) {
+      for (const k of Object.keys(r)) if (k.charAt(0) === '_') delete r[k];
+      delete r.cooldownUntil;
+      if (rearm) delete r.disarmedBy;
+    }
     if (Array.isArray(r.sessions)) r.sessions = normalizeSessions(r.sessions);
     this.saveRules();
     return r;
@@ -294,6 +384,58 @@ export const store = {
   removeRule(id) { this.rules = this.rules.filter((r) => r.id !== id); this.saveRules(); },
 
   logAlert(entry) { this.alertlog.push(entry); this.saveAlertlog(); },
+
+  /* ---- ledger --------------------------------------------------------------
+     Every entry passes validTxn, so the ledger on disk is always in the shape
+     portfolio.js expects. Returns the stored txn, or null when it was refused. */
+
+  addTxn(raw) {
+    const seen = new Set(this.ledger.map((t) => t.id));
+    const t = validTxn(raw, seen);
+    if (!t || this.ledger.length >= LEDGER_CAP) return null;
+    this.ledger.push(t); this.saveLedger(); return t;
+  },
+  // Bulk add (a CSV import): one write, and a count of what was refused.
+  addTxns(list) {
+    const seen = new Set(this.ledger.map((t) => t.id));
+    let added = 0, dropped = 0;
+    for (const raw of Array.isArray(list) ? list : []) {
+      const t = this.ledger.length < LEDGER_CAP ? validTxn(raw, seen) : null;
+      if (t) { this.ledger.push(t); added++; } else dropped++;
+    }
+    if (added) this.saveLedger();
+    return { added, dropped };
+  },
+  updateTxn(id, patch) {
+    const i = this.ledger.findIndex((t) => t.id === id); if (i < 0) return null;
+    const seen = new Set(this.ledger.filter((t) => t.id !== id).map((t) => t.id));
+    const t = validTxn({ ...this.ledger[i], ...patch, id }, seen);
+    if (!t) return null;
+    this.ledger[i] = t; this.saveLedger(); return t;
+  },
+  removeTxn(id) { this.ledger = this.ledger.filter((t) => t.id !== id); this.saveLedger(); },
+
+  /* ---- drawings / targets / learn ------------------------------------------ */
+
+  drawingsFor(sym) { const d = this.drawings[normalizeSymbol(sym)]; return Array.isArray(d) ? d : []; },
+  setDrawings(sym, list) {
+    const key = normalizeSymbol(sym); if (!key) return false;
+    const shaped = shapeDrawingList(list);
+    if (shaped.length) this.drawings[key] = shaped; else delete this.drawings[key];
+    return this.saveDrawings();
+  },
+  setTarget(key, pct) {
+    const k = String(key || '').trim().slice(0, 64); if (!k) return false;
+    const n = Number(pct);
+    if (pct == null || !Number.isFinite(n)) delete this.targets[k];
+    else this.targets[k] = Math.max(0, Math.min(100, n));
+    return this.saveTargets();
+  },
+  markSeen(id) {
+    const s = String(id || '').slice(0, 64);
+    if (!s || this.learn.seen.includes(s)) return false;
+    this.learn.seen.push(s); return this.saveLearn();
+  },
 
   /* ---- workspaces ----------------------------------------------------------
      Seed once, then get out of the way. The whole call is wrapped because the
@@ -372,7 +514,12 @@ export const store = {
       // Runtime latch bookkeeping (_latched, cooldownUntil) must not travel: a
       // re-imported rule carrying a stale latch would look armed and never fire.
       rules: this.rules.map(stripRuntime),
+      // Still exported so a file made here opens in a pre-ledger build.
       holdings: this.holdings.map(stripRuntime),
+      ledger: this.ledger.map(stripRuntime),
+      drawings: this.drawings,
+      targets: this.targets,
+      learn: this.learn,
       alertlog: this.alertlog.slice(-100),
       settings: redactKeys(this.settings),
     };
@@ -389,12 +536,18 @@ export const store = {
   // rejected one — and anything missing an id gets one, because deletion in the UI
   // is by id and a hand-written file will not have any.
   importState(json) {
-    const d = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!d || d._app !== 'carino-stocks') throw new Error('Not a Carino Stocks export file.');
+    let d = json;
+    if (typeof json === 'string') {
+      // A truncated download or the wrong file is a user mistake, not a crash;
+      // the caller shows err.message in a toast, so it has to be a sentence.
+      try { d = JSON.parse(json); }
+      catch (e) { throw new Error('This file is not valid JSON.'); }
+    }
+    if (!d || typeof d !== 'object' || d._app !== 'carino-stocks') throw new Error('Not a Carino Stocks export file.');
     if (this.hashActive) this.exitHash();   // importing is a deliberate write; leave the link view first
 
-    const dropped = { rules: 0, holdings: 0, alertlog: 0, workspaces: 0 };
-    const result = { watchlist: 0, rules: 0, holdings: 0, alertlog: 0, workspaces: 0, dropped };
+    const dropped = { rules: 0, holdings: 0, ledger: 0, drawings: 0, alertlog: 0, workspaces: 0 };
+    const result = { watchlist: 0, rules: 0, holdings: 0, ledger: 0, drawings: 0, targets: 0, alertlog: 0, workspaces: 0, dropped };
 
     if (Array.isArray(d.watchlist)) {
       this.watchlist = [...new Set(d.watchlist.map(normalizeSymbol).filter(Boolean))];
@@ -420,6 +573,36 @@ export const store = {
       }
       this.saveHoldings();
       result.holdings = this.holdings.length;
+    }
+    if (Array.isArray(d.ledger)) {
+      const drops = { n: 0 };
+      this.ledger = shapeLedger(d.ledger, drops);
+      dropped.ledger = drops.n;
+      this.saveLedger();
+      result.ledger = this.ledger.length;
+    } else if (Array.isArray(d.holdings)) {
+      // A pre-ledger file: its holdings ARE its portfolio, so they replace the
+      // ledger the same way they replaced the holdings above. Leaving the old
+      // ledger in place would show a portfolio the imported file never had.
+      this.ledger = holdingsToLedger(this.holdings);
+      this.saveLedger();
+      result.ledger = this.ledger.length;
+    }
+    if (d.drawings && typeof d.drawings === 'object' && !Array.isArray(d.drawings)) {
+      const drops = { n: 0 };
+      this.drawings = shapeDrawings(d.drawings, drops);
+      dropped.drawings = drops.n;
+      this.saveDrawings();
+      result.drawings = Object.keys(this.drawings).length;
+    }
+    if (d.targets && typeof d.targets === 'object' && !Array.isArray(d.targets)) {
+      this.targets = shapeTargets(d.targets);
+      this.saveTargets();
+      result.targets = Object.keys(this.targets).length;
+    }
+    if (d.learn && typeof d.learn === 'object') {
+      this.learn = shapeLearn(d.learn);
+      this.saveLearn();
     }
     if (Array.isArray(d.alertlog)) {
       this.alertlog = [];
@@ -451,7 +634,9 @@ export const store = {
         finnhubKey: s.finnhubKey, twelvedataKey: s.twelvedataKey, polygonKey: s.polygonKey,
         alphaVantageKey: s.alphaVantageKey, alpacaKeyId: s.alpacaKeyId, alpacaSecret: s.alpacaSecret,
       };
-      this.settings = { ...DEFAULT_SETTINGS, ...d.settings, ...keep };
+      // Coerced field by field: a hand-edited interval of "15" or a provider that
+      // disagrees with universal/selectedProvider used to be taken on trust.
+      this.settings = shapeSettings({ ...d.settings, ...keep }, s.level);
       this.saveSettings();
     }
     // The file is already in the current shape; do not let migrate() run over it again.
@@ -459,10 +644,26 @@ export const store = {
     return result;
   },
 
+  // Wipes the disk AND the memory. Leaving the in-memory state populated meant
+  // the next save*() from anything still running wrote the "erased" data back.
+  // The caller still reloads; this only makes the gap between the two safe.
   clearAll() {
     this.hashActive = false;
     hashSnapshot = null;
     for (const k of Object.values(K)) { try { localStorage.removeItem(k); } catch (e) { /* private mode */ } }
+    this.settings = shapeSettings({}, 'beginner');
+    this.watchlist = null;
+    this.rules = [];
+    this.holdings = [];
+    this.ledger = [];
+    this.drawings = {};
+    this.targets = {};
+    this.learn = shapeLearn(null);
+    this.profiles = {};
+    this.series = {};
+    this.alertlog = [];
+    for (const k of Object.keys(this.popouts)) delete this.popouts[k];
+    this.workspaces = null;
   },
 };
 
@@ -486,6 +687,23 @@ function migrate() {
       if (r && typeof r === 'object' && !Array.isArray(r.sessions)) { r.sessions = []; touched = true; }
     }
     if (touched) lsSet(K.rules, store.rules);
+  }
+
+  if (from < 3) {
+    // The portfolio moved from one-row-per-position holdings to a transaction
+    // ledger. Each holding becomes one opening buy dated 1970-01-01 and noted
+    // 'migrated', so it is visibly a carried-over balance rather than a trade the
+    // user remembers making. Only into an EMPTY ledger: a ledger that already has
+    // rows came from somewhere deliberate and must not gain duplicates.
+    // stk_holdings itself is left exactly as it was.
+    if (!store.ledger.length && store.holdings.length) {
+      store.ledger = holdingsToLedger(store.holdings);
+      if (store.ledger.length) lsSet(K.ledger, store.ledger);
+    }
+    // Persist the level chosen at boot, so the decision is made once: by the
+    // next visit a brand-new user has a seeded watchlist and would otherwise be
+    // re-classified as existing.
+    lsSet(K.settings, store.settings);
   }
 
   lsSet(K.schema, SCHEMA_VERSION);
@@ -538,24 +756,295 @@ function takeId(raw, prefix, seen) {
   return id;
 }
 
+/* Rules are rebuilt field by field, but nothing the rule legitimately carries is
+   lost: the old whitelist dropped `confirm` (which the engine reads) and would
+   have dropped every field added since. Known fields are coerced; unknown
+   non-underscore fields with plain JSON values ride along untouched, so a rule
+   written by a newer build survives a round trip through this one.
+
+   A type this build does not know is KEPT, as-is, but disarmed and flagged
+   `unsupported`. Coercing it to 'price' (the old behaviour) silently turned
+   "RSI above 70" into "price above $70". */
+
 function validRule(raw, seen) {
-  if (!raw || typeof raw !== 'object') return null;
-  const symbol = normalizeSymbol(raw.symbol);
-  const value = Number(raw.value);
-  if (!symbol || !Number.isFinite(value)) return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const symbol = normalizeRuleSymbol(raw.symbol);
+  if (!symbol) return null;
   const r = stripRuntime(raw);
+  const typeRaw = r.type == null || r.type === '' ? 'price' : r.type;
+  if (typeof typeRaw !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(typeRaw)) return null;
+  const def = ALERT_TYPES[typeRaw] || null;
+
+  // A portfolio rule on a ticker, or a ticker rule on the portfolio, measures
+  // nothing; it is a broken rule, not an unknown one.
+  if (def && (def.needs === 'portfolio') !== (symbol === PORTFOLIO_SYMBOL)) return null;
+
+  let value = Number(r.value);
+  if (r.value == null || r.value === '' || !Number.isFinite(value)) {
+    if (def && def.fixedValue != null) value = def.fixedValue;
+    else if (def && def.defValue != null && r.value == null) value = def.defValue;
+    else return null;
+  }
+
   const out = {
     id: takeId(r.id, 'r', seen),
     symbol,
-    type: r.type === 'pct' ? 'pct' : 'price',
-    op: r.op === 'below' ? 'below' : 'above',
+    type: typeRaw,
+    op: def ? (def.ops.includes(r.op) ? r.op : def.ops[0]) : (ALERT_OPS.includes(r.op) ? r.op : 'above'),
     value,
-    armed: r.armed !== false,
+    armed: def ? r.armed !== false : false,
     // An imported rule is an existing rule: absent sessions means all of them.
     sessions: normalizeSessions(r.sessions),
+    repeat: r.repeat === 'once' ? 'once' : 'rearm',
+    expires: isDay(r.expires) ? r.expires : null,
   };
-  if (typeof r.note === 'string' && r.note) out.note = r.note;
+  if (!def) { out.unsupported = true; out.disarmedBy = 'unsupported'; }
+  else if (!out.armed && DISARMED_BY.has(r.disarmedBy) && r.disarmedBy !== 'unsupported') out.disarmedBy = r.disarmedBy;
+  if (typeof r.note === 'string' && r.note) out.note = r.note.slice(0, NOTE_MAX);
+  const confirm = Math.floor(Number(r.confirm));
+  if (r.confirm != null && Number.isFinite(confirm) && confirm >= 1) out.confirm = Math.min(confirm, 10);
+  const params = shapeParams(r.params, def);
+  if (params) out.params = params;
+  const created = typeof r.created === 'string' ? Date.parse(r.created) : Number(r.created);
+  if (Number.isFinite(created) && created > 0) out.created = created;
+
+  for (const k of Object.keys(r)) {
+    if (RULE_KNOWN.has(k) || k in out) continue;
+    const v = r[k];
+    if (v === null || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) out[k] = v;
+    else if (typeof v === 'string') out[k] = v.slice(0, NOTE_MAX);
+  }
   return out;
+}
+
+// Numbers only, keyed by identifier. A known type's params are clamped to the
+// ranges its registry entry declares; an unknown type's are kept as given.
+function shapeParams(raw, def) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  const spec = def ? Object.fromEntries(def.params.map((p) => [p.key, p])) : null;
+  for (const k of Object.keys(raw)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,23}$/.test(k)) continue;
+    const n = Number(raw[k]);
+    if (!Number.isFinite(n)) continue;
+    const p = spec && spec[k];
+    if (spec && !p) continue;
+    out[k] = p ? Math.min(p.max != null ? p.max : n, Math.max(p.min != null ? p.min : n, n)) : n;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+export function normalizeRuleSymbol(s) {
+  const t = String(s || '').trim().toUpperCase();
+  return t === PORTFOLIO_SYMBOL ? PORTFOLIO_SYMBOL : normalizeSymbol(t);
+}
+
+function isDay(v) {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(v + 'T00:00:00Z');
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
+/* ---- ledger validation -------------------------------------------------------
+   Txn = {id, date, type, symbol?, qty?, price?, amount?, fee?, currency, ratio?,
+   account?, note?}. What each type requires:
+     buy / sell        symbol, qty > 0, price >= 0
+     dividend          symbol, amount
+     split             symbol, ratio > 0 (4 for a 4:1 split)
+     fee / tax / interest / deposit / withdraw   amount (symbol optional)
+   A sell's quantity is positive; direction is the type, never the sign. A
+   negative quantity from a hand-written file is read as its magnitude. */
+
+
+function validTxn(raw, seen) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const type = typeof raw.type === 'string' ? raw.type.trim().toLowerCase() : '';
+  if (!TXN_TYPES.includes(type)) return null;
+  const date = typeof raw.date === 'string' ? raw.date.trim().slice(0, 10) : '';
+  if (!isDay(date)) return null;
+  const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : NaN));
+
+  const out = { id: takeId(raw.id, 'x', seen), date, type };
+  const symbol = normalizeSymbol(raw.symbol);
+  const needsSymbol = type === 'buy' || type === 'sell' || type === 'dividend' || type === 'split';
+  if (needsSymbol && !symbol) return null;
+  if (symbol) out.symbol = symbol;
+
+  if (type === 'buy' || type === 'sell') {
+    const qty = n(raw.qty), price = n(raw.price);
+    if (qty == null || Number.isNaN(qty) || qty === 0 || price == null || Number.isNaN(price) || price < 0) return null;
+    out.qty = Math.abs(qty);
+    out.price = price;
+  } else if (type === 'split') {
+    const ratio = n(raw.ratio);
+    if (ratio == null || Number.isNaN(ratio) || ratio <= 0) return null;
+    out.ratio = ratio;
+  } else {
+    const amount = n(raw.amount);
+    if (amount == null || Number.isNaN(amount)) return null;
+    out.amount = amount;
+    // A dividend may also say how many shares it was paid on.
+    const qty = n(raw.qty);
+    if (qty != null && !Number.isNaN(qty)) out.qty = qty;
+  }
+  const fee = n(raw.fee);
+  if (fee != null && !Number.isNaN(fee)) out.fee = Math.abs(fee);
+  const ccy = typeof raw.currency === 'string' ? raw.currency.trim().toUpperCase() : '';
+  // null = not stated, read as the instrument's own quote currency. Migrated
+  // holdings have no currency on record, and inventing 'USD' would misprice
+  // every foreign listing they contain.
+  out.currency = CCY_RE.test(ccy) ? ccy : null;
+  if (typeof raw.account === 'string' && raw.account.trim()) out.account = raw.account.trim().slice(0, 40);
+  if (typeof raw.note === 'string' && raw.note) out.note = raw.note.slice(0, NOTE_MAX);
+  // A deliberate short sale and a carried-over legacy holding are both facts
+  // portfolio.js reads; dropping them turned a short into an oversold error.
+  if (type === 'sell' && raw.short === true) out.short = true;
+  if (raw.migrated === true) out.migrated = true;
+  return out;
+}
+
+function shapeLedger(raw, drops) {
+  const out = [];
+  const seen = new Set();
+  for (const t of asArray(raw)) {
+    const v = out.length < LEDGER_CAP ? validTxn(t, seen) : null;
+    if (v) out.push(v); else if (drops) drops.n++;
+  }
+  return out;
+}
+
+// Mirrors portfolio.js holdingsToTxns (inlined so store.js stays free of the
+// portfolio module): one opening trade per holding, dated the epoch and noted
+// 'migrated'. Ids derive from the holding's id so running it twice over the
+// same holdings yields the same ledger. A short (negative shares) becomes a
+// sell; a zero-share row carries no position and is skipped.
+export function holdingsToLedger(holdings) {
+  const out = [];
+  const seen = new Set();
+  for (const h of asArray(holdings)) {
+    if (!h || typeof h !== 'object') continue;
+    const shares = Number(h.shares);
+    const symbol = normalizeSymbol(h.symbol);
+    if (!symbol || !Number.isFinite(shares) || shares === 0) continue;
+    const cost = Number(h.cost) || 0;
+    const per = h.costMode === 'total' ? cost / Math.abs(shares) : cost;
+    const t = validTxn({
+      id: h.id ? 'xm-' + h.id : undefined, date: '1970-01-01', type: shares > 0 ? 'buy' : 'sell',
+      symbol, qty: Math.abs(shares), price: Math.max(0, per), fee: 0, currency: null,
+      note: h.note ? 'migrated · ' + h.note : 'migrated',
+    }, seen);
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+/* ---- drawings / targets / learn ---------------------------------------------
+   Drawing = {id, type, points:[{t, p}], text?, color?} plus any boolean flags
+   (locked, hidden, extend) the chart adds. Anchors are data-space, so a point
+   is only valid with a finite time and price. */
+
+
+function shapeDrawingList(list, drops) {
+  const out = [];
+  const seen = new Set();
+  for (const d of asArray(list)) {
+    if (out.length >= DRAWINGS_PER_SYMBOL || !d || typeof d !== 'object' || typeof d.type !== 'string' || !DRAWING_TYPES.test(d.type)) {
+      if (drops) drops.n++; continue;
+    }
+    const points = asArray(d.points)
+      .filter((pt) => pt && Number.isFinite(Number(pt.t)) && Number.isFinite(Number(pt.p)))
+      .slice(0, 8)
+      .map((pt) => ({ t: Number(pt.t), p: Number(pt.p) }));
+    if (!points.length) { if (drops) drops.n++; continue; }
+    const o = { id: takeId(d.id, 'd', seen), type: d.type, points };
+    if (typeof d.text === 'string' && d.text) o.text = d.text.slice(0, 200);
+    if (typeof d.color === 'string' && /^[#a-zA-Z0-9(),.\s%-]{1,40}$/.test(d.color)) o.color = d.color;
+    for (const k of Object.keys(d)) if (typeof d[k] === 'boolean' && /^[a-z][a-zA-Z]{0,15}$/.test(k)) o[k] = d[k];
+    out.push(o);
+  }
+  return out;
+}
+
+function shapeDrawings(raw, drops) {
+  const out = {};
+  const src = asObject(raw);
+  for (const k of Object.keys(src)) {
+    const sym = normalizeSymbol(k);
+    if (!sym || Object.keys(out).length >= DRAWING_SYMBOLS_CAP) { if (drops) drops.n++; continue; }
+    const list = shapeDrawingList(src[k], drops);
+    if (list.length) out[sym] = list;
+  }
+  return out;
+}
+
+// Allocation targets: key (a symbol, sector, asset class...) → percent 0..100.
+function shapeTargets(raw) {
+  const out = {};
+  const src = asObject(raw);
+  for (const k of Object.keys(src)) {
+    const key = String(k).trim().slice(0, 64);
+    const n = Number(src[k]);
+    if (key && Number.isFinite(n)) out[key] = Math.max(0, Math.min(100, n));
+  }
+  return out;
+}
+
+function shapeLearn(raw) {
+  const src = asObject(raw);
+  const seen = [...new Set(asArray(src.seen).filter((s) => typeof s === 'string' && s).map((s) => s.slice(0, 64)))].slice(0, 2000);
+  return { seen, tourDone: src.tourDone === true };
+}
+
+/* ---- settings ----------------------------------------------------------------
+   Every known setting is coerced to the type its default has; unknown keys are
+   kept as they are, because other modules may persist their own preferences in
+   here. `provider` is DERIVED and is always recomputed, never trusted. */
+
+function shapeSettings(raw, level) {
+  const src = asObject(raw);
+  const s = { ...DEFAULT_SETTINGS, ...src };
+  for (const k of Object.keys(DEFAULT_SETTINGS)) {
+    const d = DEFAULT_SETTINGS[k], v = s[k];
+    if (typeof d === 'boolean') s[k] = typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : d;
+    else if (typeof d === 'string' && typeof v !== 'string') s[k] = d;
+  }
+  const iv = Number(s.interval);
+  s.interval = Number.isFinite(iv) ? Math.max(5, Math.min(3600, Math.round(iv))) : DEFAULT_SETTINGS.interval;
+  if (!/^[a-z][a-z0-9-]{0,23}$/.test(s.selectedProvider)) s.selectedProvider = DEFAULT_SETTINGS.selectedProvider;
+  s.provider = s.universal ? s.selectedProvider : 'auto';
+  s.level = LEVELS.includes(src.level) ? src.level : (LEVELS.includes(level) ? level : DEFAULT_SETTINGS.level);
+  s.costMethod = COST_METHODS.includes(s.costMethod) ? s.costMethod : 'fifo';
+  const ccy = String(s.baseCurrency || '').trim().toUpperCase();
+  s.baseCurrency = /^[A-Z]{3}$/.test(ccy) ? ccy : 'USD';
+  s.chartDefaults = shapeChartDefaults(src.chartDefaults);
+  return s;
+}
+
+function shapeChartDefaults(raw) {
+  const src = asObject(raw);
+  const indicators = [];
+  for (const it of asArray(src.indicators)) {
+    if (indicators.length >= 20 || !it || typeof it.id !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,23}$/.test(it.id)) continue;
+    const params = {};
+    for (const [k, v] of Object.entries(asObject(it.params))) {
+      if (/^[A-Za-z][A-Za-z0-9_]{0,23}$/.test(k) && Number.isFinite(Number(v))) params[k] = Number(v);
+    }
+    indicators.push({ id: it.id, params });
+  }
+  return {
+    type: CHART_TYPES.includes(src.type) ? src.type : 'candle',
+    volume: typeof src.volume === 'boolean' ? src.volume : true,
+    indicators,
+  };
+}
+
+// New browser → beginner. Anyone who already built something here (a saved
+// watchlist, a rule, a holding) → standard, so the upgrade does not hide tools
+// they were using. An explicit stored level always wins (shapeSettings).
+function initialLevel(settings, watchlist, rules, holdings) {
+  const existing = Array.isArray(watchlist) || (Array.isArray(rules) && rules.length > 0)
+    || (Array.isArray(holdings) && holdings.length > 0) || settings.ack === true;
+  return existing ? 'standard' : 'beginner';
 }
 
 function validHolding(raw, seen) {
@@ -587,11 +1076,13 @@ function validLogEntry(raw) {
   const text = typeof raw.text === 'string' ? raw.text : '';
   if (!Number.isFinite(ts) || !text) return null;
 
-  const out = { ts, symbol: normalizeSymbol(raw.symbol), text };
+  const out = { ts, symbol: normalizeRuleSymbol(raw.symbol), text };
   if (typeof raw.session === 'string' && raw.session) out.session = raw.session;
   if (typeof raw.sessionLabel === 'string' && raw.sessionLabel) out.sessionLabel = raw.sessionLabel;
   if (typeof raw.scope === 'string' && raw.scope) out.scope = raw.scope;
   if (raw.approx != null) out.approx = !!raw.approx;
+  if (typeof raw.ruleId === 'string' && raw.ruleId) out.ruleId = raw.ruleId.slice(0, 64);
+  if (typeof raw.type === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(raw.type)) out.type = raw.type;
 
   const q = raw.quote;
   if (q && typeof q === 'object') {
@@ -605,6 +1096,7 @@ function validLogEntry(raw) {
       price: num(q.price), change: num(q.change), changePct: num(q.changePct),
       ts: num(q.ts), source: typeof q.source === 'string' ? q.source : null,
     };
+    if (typeof q.currency === 'string' && CCY_RE.test(q.currency)) out.quote.currency = q.currency;
   }
   return out;
 }
@@ -717,7 +1209,9 @@ function referencedSymbols() {
   const add = (s) => { const n = normalizeSymbol(s); if (n) keep.add(n); };
   if (Array.isArray(store.watchlist)) for (const s of store.watchlist) add(s);
   for (const h of store.holdings) if (h) add(h.symbol);
-  for (const r of store.rules) if (r) add(r.symbol);
+  for (const t of store.ledger) if (t && t.symbol) add(t.symbol);
+  for (const sym of Object.keys(store.drawings)) add(sym);
+  for (const r of store.rules) if (r && r.symbol !== PORTFOLIO_SYMBOL) add(r.symbol);
   // A widget can be pinned to a symbol that is not on the watchlist — that is the
   // entire point of pinning one — so its cached profile and series are in use even
   // though nothing else in the store mentions it. Read defensively: this runs on

@@ -1,0 +1,141 @@
+{
+  "paths": [
+    {"id": "start", "title": "Start here", "summary": "Five short lessons for your first session: what the numbers mean, where they come from and how to get notified.", "lessons": ["reading-quote", "data-delays", "candlesticks", "alerts-here", "diversification"]},
+    {"id": "charts", "title": "Reading charts", "summary": "Trends, volume, momentum and the levels many traders watch. Descriptive tools, not predictions.", "lessons": ["trends-ma", "volume", "rsi-momentum", "support-resistance"]},
+    {"id": "money", "title": "Money and risk", "summary": "How much to risk, how to spread it and what costs eat into returns.", "lessons": ["risk-sizing", "diversification", "fees-taxes"]},
+    {"id": "pro", "title": "Pro tips", "summary": "Keyboard, multi-chart layouts, screens and indicator alerts for heavier use.", "lessons": ["pro-tips"]}
+  ],
+  "lessons": [
+    {
+      "id": "reading-quote", "title": "Reading a quote", "level": "beginner", "minutes": 3,
+      "summary": "Last price, change, percent change, volume and range: the five numbers you see everywhere.",
+      "learn": ["quote", "last-price", "prev-close", "pct-change", "volume", "day-range", "bid", "ask", "spread"],
+      "steps": [
+        {"title": "Find a symbol", "body": "Your watchlist sits in the left rail. Each row is one symbol with its latest price and today's move. Click a row to make it the selected symbol; linked widgets follow it.", "target": "#railList", "try": "Click any symbol in the list."},
+        {"title": "Last price and change", "body": "The big number is the last traded price. Change and percent change are measured from the previous regular-session close, not from when you opened the app. Green means above yesterday's close, red below.", "try": "Compare two symbols by percent change rather than by price."},
+        {"title": "Volume and range", "body": "Volume counts shares traded today; compare it with average volume to see whether today is busy. The day range shows today's low and high, and where the last price sits inside it.", "try": "Look for a symbol whose last price is near the top of its day range."},
+        {"title": "Bid, ask and spread", "body": "If your data plan includes them, bid is what buyers offer and ask is what sellers want. The gap between them, the spread, is a cost you would pay to trade. Wide spreads usually mean thin trading.", "try": "Open the quote widget for a symbol and check whether bid/ask are available from your provider."}
+      ]
+    },
+    {
+      "id": "data-delays", "title": "Data, delays and providers", "level": "beginner", "minutes": 3,
+      "summary": "Where prices come from, why they can be late, and how this app tells you.",
+      "learn": ["data-provider", "delayed-data", "real-time-data", "stale-quote", "rate-limit", "api-key", "demo-data", "market-session"],
+      "steps": [
+        {"title": "Demo or live", "body": "This chip shows where data is coming from. DEMO means simulated prices for learning: they are not real. Add a free API key in Settings to switch to a live provider.", "target": "#modeChip", "try": "Hover the chip to see the current source."},
+        {"title": "Delayed is normal", "body": "Many free plans deliver prices 15 minutes late, or only from one exchange venue. Every quote has a timestamp; when it stops advancing during an open session, the app marks it stale instead of pretending it is live.", "try": "Look for a quote time on a card or the quote widget."},
+        {"title": "Market sessions", "body": "The session chip works out from your device clock whether the market is pre-market, open, after-hours or closed, using a local holiday calendar. A dashed border means the calendar cannot vouch for that date.", "target": "#sessChip", "try": "Click the session chip to see the next open or close."},
+        {"title": "API limits", "body": "Free keys allow a limited number of requests per minute or day. The quota meter shows how much you have used. Watching fewer symbols, or refreshing less often, makes the quota last.", "target": "#quotaBox", "try": "Change the refresh interval and watch the meter."}
+      ]
+    },
+    {
+      "id": "candlesticks", "title": "Candlesticks in two minutes", "level": "beginner", "minutes": 2,
+      "summary": "How one candle summarises open, high, low and close, and why the timeframe matters.",
+      "learn": ["candlestick", "ohlc", "timeframe", "line-chart", "heikin-ashi", "gap"],
+      "steps": [
+        {"title": "Body and wicks", "body": "A candle's body runs from the open to the close. Its thin wicks reach the high and the low. A green (up) candle closed above where it opened; a red (down) candle closed below.", "target": "[data-kind=\"chart\"]", "try": "Hover a candle to read its open, high, low and close."},
+        {"title": "One candle, one period", "body": "Each candle covers one interval: a minute, an hour, a day. The same stock can look calm on a daily chart and wild on a 1-minute chart. Pick the range first (1D, 1M, 1Y), then the interval.", "try": "Switch between 1D and 1Y and notice how the candle size changes."},
+        {"title": "Gaps", "body": "When a candle opens far from the previous close, a gap appears. Gaps usually come from news released while the market was closed.", "try": "Find a gap on a daily chart."},
+        {"title": "Simpler views", "body": "A line chart joins the closes and hides the wicks, which is less noisy when you are starting out. Heikin-Ashi candles are smoothed averages: good for seeing trends, but they are not real prices.", "try": "Switch the chart type to Line, then back to Candles."}
+      ]
+    },
+    {
+      "id": "alerts-here", "title": "How alerts work here", "level": "beginner", "minutes": 3,
+      "summary": "Rules that watch for you. They notify; they never trade.",
+      "learn": ["price-alert", "crossover", "alert-repeat", "alert-confirmation", "trailing-stop", "portfolio-alert", "delayed-data"],
+      "steps": [
+        {"title": "Open the rules", "body": "Alerts are rules that run in your browser each time prices refresh. They only notify you; nothing is ever bought or sold.", "target": "#btnAlerts", "try": "Open the alerts panel."},
+        {"title": "Above versus crosses above", "body": "'Above' is a state: it is true for as long as the price stays above the level. 'Crosses above' is an event: it fires only at the moment of crossing. For most price levels, crossing is what you want.", "try": "Create a 'crosses above' rule a little above the current price of a symbol."},
+        {"title": "Once or re-arm", "body": "'Once' fires one time and stops. 'Re-arm' fires again after the condition resets. Confirmation makes the rule wait for several refreshes in a row, which filters brief spikes.", "try": "Set a rule to 'once' and add 2 ticks of confirmation."},
+        {"title": "Beyond price", "body": "Rules can watch percent change, gaps, volume spikes, 52-week highs, moving-average crosses, RSI levels, trailing stops and your whole portfolio. Each type has a '?' explaining what it measures.", "try": "Browse the rule types and open the help for one you do not know."},
+        {"title": "Know the limits", "body": "Rules run only while this page is open, and they are only as fresh as your data. On a delayed feed, an alert fires late.", "try": "Turn on browser notifications in Settings if you want alerts while the tab is in the background."}
+      ]
+    },
+    {
+      "id": "trends-ma", "title": "Trends and moving averages", "level": "beginner", "minutes": 3,
+      "summary": "Seeing direction through the noise, and why every average lags.",
+      "learn": ["trend", "moving-average", "sma", "ema", "golden-cross", "crossover", "price-ma-cross"],
+      "steps": [
+        {"title": "Higher highs, higher lows", "body": "An uptrend is a series of higher highs and higher lows; a downtrend is the reverse. Trends exist on every timeframe and can disagree with each other.", "target": "[data-kind=\"chart\"]", "try": "On a 1Y daily chart, decide whether the stock is trending up, down or sideways."},
+        {"title": "Add a moving average", "body": "A moving average smooths the price. The 50-day and 200-day simple averages are the most widely followed. Price above a rising 200-day is often described as a long-term uptrend.", "try": "Add SMA 50 and SMA 200 to the chart."},
+        {"title": "Crosses", "body": "When the 50-day crosses above the 200-day it is called a golden cross; below, a death cross. Both are late by design: averages describe the past.", "try": "Find the last time the two averages crossed."},
+        {"title": "Turn it into an alert", "body": "Instead of checking charts every day, a rule can notify you when price crosses a moving average, or when two averages cross.", "try": "Create a 'price crosses SMA(200)' alert for one symbol."}
+      ]
+    },
+    {
+      "id": "volume", "title": "Volume: the effort behind a move", "level": "beginner", "minutes": 2,
+      "summary": "Why the same move means more on heavy volume, and how to spot unusual activity.",
+      "learn": ["volume", "avg-volume", "relative-volume", "volume-ma", "obv", "liquidity"],
+      "steps": [
+        {"title": "Volume bars", "body": "The bars under the price show how many shares traded in each period. Green bars belong to up candles, red to down candles.", "target": "[data-kind=\"chart\"]", "try": "Turn the volume pane on and find the tallest bar of the last month."},
+        {"title": "Normal versus unusual", "body": "A volume average line shows what is normal. Relative volume (RVOL) divides today's volume by the average: 3x means three times the usual activity.", "try": "Compare today's volume with the average volume in the quote widget."},
+        {"title": "Early in the day", "body": "Daily volume starts at zero each morning, so a full-day comparison makes mornings look quiet. Keep that in mind before reading too much into low numbers.", "try": "Create a relative-volume alert at 2x for a symbol you follow."}
+      ]
+    },
+    {
+      "id": "rsi-momentum", "title": "RSI and momentum", "level": "standard", "minutes": 3,
+      "summary": "Measuring the speed of moves, and why 'overbought' is not a sell signal.",
+      "learn": ["rsi", "momentum", "overbought-oversold", "macd", "divergence", "stochastic"],
+      "steps": [
+        {"title": "What RSI measures", "body": "RSI compares the size of recent up moves with recent down moves on a 0 to 100 scale. It measures speed, not value.", "target": "[data-kind=\"chart\"]", "try": "Add RSI (14) as a pane under the chart."},
+        {"title": "70 and 30", "body": "Readings above 70 are called overbought and below 30 oversold. In strong trends RSI can stay above 70 for weeks, so these labels describe, they do not predict.", "try": "Find a period where RSI stayed above 70 while the price kept rising."},
+        {"title": "MACD", "body": "MACD is the gap between two exponential averages, with a signal line. Crosses of MACD and its signal are read as momentum shifts; they lag, like all averages.", "try": "Add MACD and compare its crosses with the price chart."},
+        {"title": "Divergence", "body": "When price makes a new high but RSI makes a lower high, momentum is not confirming the move. Divergences can last a long time, so treat them as context.", "try": "Look for one divergence on a 1Y chart."}
+      ]
+    },
+    {
+      "id": "support-resistance", "title": "Support and resistance", "level": "standard", "minutes": 3,
+      "summary": "Levels where price has paused before, and how to mark them.",
+      "learn": ["support-resistance", "breakout", "52-week-high", "pivot-points", "fibonacci", "trendline"],
+      "steps": [
+        {"title": "Zones, not lines", "body": "Support is where falling prices have tended to stop; resistance where rising prices have stalled. Previous highs and lows, round numbers and the 52-week high are common examples.", "target": "[data-kind=\"chart\"]", "try": "Find a price where the stock turned around at least twice."},
+        {"title": "Mark the level", "body": "Use the horizontal-line tool to mark a level. Drawings are saved per symbol on this device.", "try": "Draw a horizontal line at a level you found."},
+        {"title": "Breakouts", "body": "A close through resistance on heavy volume is called a breakout. Many breakouts fail and fall back, so some people wait for a close beyond the level.", "try": "Right-click (or long-press) the line and choose 'Alert at this price'."}
+      ]
+    },
+    {
+      "id": "risk-sizing", "title": "Risk and position sizing", "level": "standard", "minutes": 4,
+      "summary": "Decide what you can lose before deciding what you hope to gain. Educational, not advice.",
+      "learn": ["position-size", "stop-loss", "risk-reward", "r-multiple", "break-even", "leverage", "gap"],
+      "steps": [
+        {"title": "Start with the loss", "body": "A common educational rule is to risk only a small, fixed share of an account on any one idea, such as 1%. On a 50,000 account that is 500.", "try": "Write down the maximum you would accept losing on one position."},
+        {"title": "Stop distance sets the size", "body": "Shares = money at risk / (entry - stop). With entry 40 and stop 37, risk is 3 per share, so 500 of risk allows about 166 shares.", "try": "Use the position-size calculator with your own numbers."},
+        {"title": "Reward versus risk", "body": "If the target is 46, the reward is 6 against a risk of 3: a 2:1 ratio. At 2:1 you would break even being right one time in three, before costs.", "try": "Compute the break-even win rate for a 1.5:1 setup."},
+        {"title": "What a stop cannot do", "body": "Stops do not protect against gaps: a stock can open far below your level. Leverage makes this worse, because losses can exceed what you put in.", "try": "Set a trailing-stop alert on a position to watch your exit without placing an order."}
+      ]
+    },
+    {
+      "id": "diversification", "title": "Diversification and allocation", "level": "beginner", "minutes": 3,
+      "summary": "Spreading risk so that one bad outcome does not sink everything.",
+      "learn": ["diversification", "allocation", "correlation", "etf", "drift", "rebalancing", "currency-risk"],
+      "steps": [
+        {"title": "Many eggs, many baskets", "body": "A single company can lose half its value on bad news. A fund holding hundreds of companies rarely does because of one of them. Diversifying reduces company-specific risk, not market risk.", "target": "#btnHoldings", "try": "Open your holdings and count how many separate companies you really own."},
+        {"title": "Look at the mix", "body": "Allocation shows your money by asset class, sector, country, currency or account. Several ETFs can hold the same giant companies, so check the overlap.", "try": "Group your portfolio by sector and by currency."},
+        {"title": "Targets and drift", "body": "If you set target weights, drift shows how far each holding has moved from its target as prices change. The app only shows drift; what to do about it is your decision.", "try": "Set a target weight for one holding and watch its drift."}
+      ]
+    },
+    {
+      "id": "fees-taxes", "title": "Fees and taxes basics", "level": "beginner", "minutes": 3,
+      "summary": "The costs you can control, and why the ledger matters at tax time. Informational only.",
+      "learn": ["fees", "spread", "expense-ratio", "cost-basis", "realized-pl", "fifo", "average-cost", "taxes", "overtrading"],
+      "steps": [
+        {"title": "Costs are certain", "body": "Commissions, spreads, fund expense ratios and currency conversion all reduce returns, and unlike returns they are guaranteed. Frequent small trades add up quickly.", "try": "Estimate what you paid in fees last year."},
+        {"title": "Record every transaction", "body": "Buys, sells, dividends, fees and splits each go in the ledger. With dates and fees recorded, the app can work out cost basis, realized gains and income.", "target": "#btnHoldings", "try": "Add a past purchase with its real date and fee."},
+        {"title": "Lot methods", "body": "FIFO sells the oldest shares first; average cost uses one blended price. They give different realized gains for the same trades. Your country's tax rules decide which applies.", "try": "Switch the cost method in Settings and compare realized P/L."},
+        {"title": "Not tax advice", "body": "Figures here are informational. Your broker's official statements and a qualified professional are the authorities on what you owe.", "try": "Export the realized-gains CSV to keep with your records."}
+      ]
+    },
+    {
+      "id": "pro-tips", "title": "Pro tips", "level": "pro", "minutes": 4,
+      "summary": "Keyboard control, linked multi-chart layouts, screens and indicator alerts.",
+      "learn": ["screener", "macd-cross", "bollinger-break", "atr-move", "relative-strength", "rate-limit"],
+      "steps": [
+        {"title": "Keyboard on charts", "body": "Click a chart to focus it, then use + and - to zoom, the arrow keys to pan, Home and End to jump, and double-click to reset the view.", "target": "[data-kind=\"chart\"]", "try": "Zoom into last week using only the keyboard."},
+        {"title": "Multi-chart layouts", "body": "Add several chart widgets to one tab. Linked widgets follow the selected symbol; unlink one to pin it, for example to keep SPY next to the stock you are studying. Crosshairs can be synced across charts.", "target": ".wk-add", "try": "Add a second chart, pin it to an index and compare."},
+        {"title": "Compare and relative strength", "body": "Overlay another symbol on a chart in percent terms, or divide one by the other, to see which has led over the period.", "try": "Compare a stock with its sector ETF over 1Y."},
+        {"title": "Screens", "body": "Screens filter your symbols by conditions such as distance from the 52-week high, RSI or relative volume. Presets are starting points for research, not recommendations.", "try": "Run a preset screen and save a modified copy."},
+        {"title": "Indicator alerts", "body": "Rules can fire on MACD signal crosses, Bollinger Band breaks, moves larger than k x ATR and moving-average crosses. They use daily bars, so they cost extra API calls; keep the list focused.", "target": "#btnAlerts", "try": "Create an ATR-move alert with k = 2 on a volatile symbol."}
+      ]
+    }
+  ]
+}

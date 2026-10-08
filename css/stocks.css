@@ -199,13 +199,16 @@ table.data tr:hover td{background:var(--accent-faint);}
 
 /* ---- detail drawer ---- */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:150;}
-.drawer{position:fixed;top:0;right:0;height:100vh;width:460px;max-width:92vw;background:var(--bg-elev);
+.drawer{position:fixed;top:var(--nav-h);right:0;height:calc(100vh - var(--nav-h));height:calc(100dvh - var(--nav-h));width:760px;max-width:100vw;background:var(--bg-elev);
   border-left:1px solid var(--border-hi);z-index:160;display:flex;flex-direction:column;
   transform:translateX(100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);}
 .drawer.open{transform:translateX(0);}
+/* `display:flex` above would otherwise beat the hidden attribute, leaving a
+   closed drawer's buttons in the tab order off-screen. */
+.drawer[hidden],.scrim[hidden]{display:none;}
 .drawer-head{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border);}
 .drawer-title{font-family:var(--display);font-weight:800;font-size:1.1rem;}
-.drawer-body{padding:18px;overflow-y:auto;}
+.drawer-body{padding:18px;overflow-y:auto;flex:1;min-height:0;}
 .kv-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin-bottom:18px;}
 .kv-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);align-self:center;}
 .kv-v{font-family:var(--mono);font-size:.82rem;text-align:right;}
@@ -330,6 +333,35 @@ body.privacy-on .amount:hover{filter:none;}
    controls, the rail, the drawer, the modals, and the shared components
    (.card, .tag, .delta, .stat-tile, table.data) that widgets reuse. */
 
+/* ---- drawer sections (chart, statistics, events, news) ---- */
+.ds-kv{grid-template-columns:repeat(2,auto 1fr);column-gap:18px;}
+.ds-kv .kv-v.pos{color:var(--ok);} .ds-kv .kv-v.neg{color:var(--err);}
+.ds-chart{height:min(56vh,440px);min-height:300px;margin-bottom:18px;}
+.ds-sec{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);
+  margin:16px 0 8px;display:flex;align-items:center;gap:6px;font-weight:600;}
+.ds-box .kv-grid{grid-template-columns:repeat(2,auto 1fr);column-gap:18px;margin-bottom:8px;}
+.ds-box .kv-k{display:flex;align-items:center;gap:4px;}
+.kv-k .learn-help,.ds-sec .learn-help{flex-shrink:0;}
+.rule-badge[hidden]{display:none;}
+
+/* ---- rail extras ---- */
+.info-i{font-family:var(--display);font-style:italic;font-weight:800;font-size:.78rem;line-height:1;}
+/* A select styled like the fleet inputs; the bare control rendered as a white
+   system box on the dark theme. (.cs-btn selects keep their own look.) */
+select.cs-select:not(.cs-btn){background:var(--bg-card);color:var(--text-sec);border:1px solid var(--border);border-radius:5px;
+  padding:0 8px;font-family:var(--mono);cursor:pointer;}
+select.cs-select:not(.cs-btn):hover{border-color:var(--accent-dim);}
+.rail-row{grid-template-columns:1fr auto auto;}
+.rr-info{opacity:.55;flex-shrink:0;}
+.rail-row:hover .rr-info,.rr-info:focus-visible,.rail-row.active .rr-info{opacity:1;}
+.rail-hint{padding:4px 14px 8px;font-size:.6rem;}
+.rail-toggle{display:none;}
+
+/* market strip tiles are buttons: click links, double-click opens details */
+.mkt-tile{text-align:left;color:inherit;font:inherit;cursor:pointer;}
+.mkt-tile:hover{border-color:var(--accent-dim);}
+.mkt-tile:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+
 /* ---- responsive ---- */
 @media(max-width:900px){
   /* The grid's own collapse, and handing scrolling back to the page, live in
@@ -338,11 +370,220 @@ body.privacy-on .amount:hover{filter:none;}
   .ws-side{position:fixed;top:var(--nav-h);left:0;bottom:0;z-index:120;transform:translateX(-100%);transition:transform .2s;}
   .ws-side.open{transform:translateX(0);}
   .workspace{display:block;} .ws-main{height:auto;}
+  .ws-side{width:min(320px,88vw);}
+  .ws-side.open{box-shadow:12px 0 40px rgba(0,0,0,.55);}
+  .rail-toggle{display:inline-flex;}
+  /* The app's controls live in the shared navbar; on a narrow screen they
+     scroll sideways inside it instead of widening the whole page. */
+  body #carinoNav .cn-right{flex-shrink:1;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;}
+  body #carinoNav .cn-right::-webkit-scrollbar{display:none;}
+  /* The actions row must keep its natural width inside that scroller; shrunk,
+     its buttons spilled over the language switch and the social links. */
+  body #carinoNav .cn-right > .cn-actions,body #carinoNav .cn-actions > *{flex-shrink:0;}
+  .ds-kv,.ds-box .kv-grid{grid-template-columns:auto 1fr;}
 }
 @media(max-width:560px){
-  .drawer{width:100vw;} .card-price{font-size:1.3rem;}
+  .drawer{width:100vw;}
+  /* One swipeable row of index tiles instead of a wall of them above the board. */
+  .mkt-tiles{flex-wrap:nowrap;overflow-x:auto;width:100%;scrollbar-width:none;}
+  .mkt-tiles .stat-tile{min-width:118px;flex-shrink:0;padding:6px 10px;}
+  .mkt-tiles .stat-tile .st-value{font-size:.9rem;} .card-price{font-size:1.3rem;}
   .rule-add{grid-template-columns:1fr 1fr;}
   .cap-row{grid-template-columns:9px 1fr;} .cap-row .cap-v{grid-column:2;}
   .picker-row{flex-direction:column;align-items:stretch;}
   .hash-banner{padding:10px 14px;}
+}
+
+/* ---- wide dialogs: alerts, transactions, CSV import ----
+   The default modal is a form-sized 460px; these hold tables, so they widen
+   and the body keeps scrolling inside the 88vh frame. */
+.modal.wide{max-width:780px;}
+.modal.wide.xl{max-width:1040px;}
+.modal[hidden]{display:none;}
+/* Table dialogs keep their footer in view: the body scrolls, the foot stays. */
+.modal.wide:not([hidden]){display:flex;flex-direction:column;overflow:hidden;}
+.modal.wide .modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;}
+.modal.wide .modal-head,.modal.wide .modal-foot{flex-shrink:0;}
+
+/* alert form (alerts-ui.js) */
+.al-form{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);}
+.al-form.editing{border-color:var(--accent-dim);box-shadow:0 0 0 3px var(--accent-faint);}
+.al-row{display:grid;grid-template-columns:1fr 1.4fr;gap:10px;}
+.al-type-row,.al-val-row{display:flex;align-items:center;gap:6px;}
+.al-type-row .input{flex:1;min-width:0;}
+.al-val-row .input{flex:1;min-width:0;}
+.al-unit{font-family:var(--mono);font-size:.72rem;color:var(--text-muted);min-width:1ch;}
+.al-params{display:flex;gap:10px;flex-wrap:wrap;}
+.al-params[hidden]{display:none;}
+.al-param{flex:1;min-width:120px;}
+.al-preview{font-size:.74rem;color:var(--text-sec);min-height:1.2em;line-height:1.5;}
+.al-preview strong{color:var(--text);font-family:var(--mono);}
+.al-verdict{font-family:var(--mono);font-size:.7rem;}
+.al-preview.hot .al-verdict{color:var(--accent);}
+.al-preview.wait .al-verdict{color:var(--text-muted);}
+.al-more summary,.tx-more summary,.led-realized summary,.imp-map summary{cursor:pointer;font-family:var(--mono);font-size:.66rem;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);padding:4px 0;}
+.al-more summary:hover,.tx-more summary:hover,.led-realized summary:hover,.imp-map summary:hover{color:var(--accent);}
+.al-more[open]>*:not(summary),.tx-more[open]>*:not(summary){margin-top:8px;}
+.al-acts{display:flex;align-items:center;gap:8px;}
+.al-acts .warn-note[hidden]{display:none;}
+.rule-group{display:flex;flex-direction:column;gap:4px;}
+.rule-ghead{display:flex;align-items:baseline;gap:10px;padding:2px 2px 0;}
+.rule-row.off{opacity:.62;}
+.rule-row.editing{border-color:var(--accent-dim);}
+.rule-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.rule-main .rule-cond{flex:none;white-space:normal;}
+.rule-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.rule-note{max-width:26ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rule-acts{display:inline-flex;gap:4px;flex-shrink:0;}
+.switch:disabled{opacity:.4;cursor:not-allowed;}
+.log-head .cs-select.sm{height:26px;}
+
+/* transactions (ledger-ui.js) */
+.led-filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.led-filters .cs-select.sm{height:28px;max-width:160px;}
+.led-date{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:.6rem;color:var(--text-muted);text-transform:uppercase;}
+.led-date .input.sm{width:132px;height:28px;}
+.led-wrap{max-height:46vh;overflow:auto;}
+table.data.led-table{font-size:.72rem;}
+table.data.led-table th,table.data.led-table td{padding:5px 8px;}
+table.data.led-table thead th{position:sticky;top:0;z-index:1;}
+.led-type{display:flex;gap:4px;align-items:center;}
+.led-type .tag{font-size:.56rem;}
+.led-t-buy{color:var(--ok);border-color:rgba(34,197,94,.4);}
+.led-t-sell{color:var(--err);border-color:rgba(239,68,68,.45);}
+.led-t-dividend,.led-t-interest{color:var(--accent);border-color:var(--accent-dim);}
+.led-note{max-width:22ch;overflow:hidden;text-overflow:ellipsis;color:var(--text-sec);}
+.led-act{display:flex;gap:4px;justify-content:flex-end;}
+.led-issues{display:flex;flex-direction:column;gap:4px;}
+.led-issues[hidden]{display:none;}
+.led-realized[hidden]{display:none;}
+.led-realized>*:not(summary){margin-top:8px;}
+.tx-f[hidden]{display:none;}
+.tx-type-row{align-items:flex-end;}
+#txHint{min-height:2.6em;}
+
+/* CSV import */
+.imp-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:22px 16px;
+  border:1px dashed var(--border-hi);border-radius:8px;background:var(--bg);cursor:pointer;transition:.15s;}
+.imp-drop:hover,.imp-drop.over,.imp-drop:focus-visible{border-color:var(--accent);background:var(--accent-faint);outline:none;}
+.imp-drop strong{font-size:.86rem;}
+.imp-file{color:var(--accent);}
+.imp-step{display:flex;flex-direction:column;gap:10px;}
+.imp-step[hidden]{display:none;}
+.imp-summary{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.8rem;}
+.imp-n.ok{color:var(--ok);border-color:rgba(34,197,94,.4);}
+.imp-n.err{color:var(--err);border-color:rgba(239,68,68,.45);}
+.imp-map-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:8px;}
+.imp-map-grid .input.sm{height:28px;}
+.imp-prev-wrap{max-height:36vh;overflow:auto;}
+.imp-dup td{color:var(--text-muted);}
+.imp-errs,.imp-warn{display:flex;flex-direction:column;gap:2px;max-height:20vh;overflow:auto;}
+.settings-section .field-row{margin-bottom:6px;}
+
+@media(max-width:700px){
+  .al-row{grid-template-columns:1fr;}
+  .led-filters .cs-select.sm{max-width:none;flex:1 1 40%;}
+  .led-date{flex:1 1 45%;} .led-date .input.sm{width:100%;}
+  .modal .field-row{flex-wrap:wrap;} .modal .field-row .field{min-width:130px;}
+  .modal-foot{flex-wrap:wrap;}
+}
+
+/* ---- experience level, onboarding, palette, data panel (integration 3) ----
+   Fleet tokens only. The level button reads as a chip with a label, because the
+   level is state the user should be able to see at a glance. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+.lvl-btn{gap:6px;}
+.lvl-btn .lvl-ico{color:var(--accent);font-size:.8rem;}
+body[data-level="beginner"] .lvl-btn{border-color:rgba(34,197,94,.4);color:var(--ok);}
+body[data-level="pro"] .lvl-btn{border-color:var(--border-hi);color:var(--text);}
+.cs-btn:focus-visible,.seg-btn:focus-visible,.btn-primary:focus-visible,.sess-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.level-pop{position:fixed;z-index:260;width:min(340px,calc(100vw - 16px));padding:14px;display:flex;flex-direction:column;gap:10px;
+  background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:8px;box-shadow:0 14px 40px rgba(0,0,0,.6);}
+.level-pop[hidden]{display:none;}
+.level-pop-title{font-family:var(--display);font-weight:800;font-size:.95rem;}
+.level-pop-acts{display:flex;gap:8px;flex-wrap:wrap;}
+.learn-levels .seg-btn{min-width:84px;}
+
+/* Onboarding: the second step of the first-run card. */
+.ack-step[hidden]{display:none;}
+.ack-q{font-family:var(--display);font-weight:800;font-size:1.15rem;margin-bottom:14px;}
+.ack-levels{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;text-align:left;}
+.ack-lv{display:flex;flex-direction:column;gap:4px;padding:12px 14px;background:transparent;border:1px solid var(--border-hi);
+  border-radius:8px;color:var(--text);font-family:var(--sans);cursor:pointer;transition:.15s;text-align:left;}
+.ack-lv strong{font-family:var(--display);font-size:.95rem;}
+.ack-lv span{font-size:.78rem;color:var(--text-sec);line-height:1.5;}
+.ack-lv:hover,.ack-lv:focus-visible{border-color:var(--accent);background:var(--accent-faint);outline:none;}
+.ack-lv:focus-visible{box-shadow:0 0 0 2px var(--accent-dim);}
+
+/* Settings: level section and the provider table. */
+.settings-section.first{border-top:none;padding-top:0;}
+.level-layouts{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.prov-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:6px;}
+.prov-tbl{width:100%;border-collapse:collapse;font-size:.72rem;}
+.prov-tbl th,.prov-tbl td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;}
+.prov-tbl thead th{font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);font-weight:600;background:var(--bg-elev);}
+.prov-tbl tbody tr:last-child th,.prov-tbl tbody tr:last-child td{border-bottom:none;}
+.prov-name{min-width:180px;font-weight:400;}
+.prov-name strong{display:block;font-family:var(--display);font-size:.82rem;margin-bottom:3px;}
+.prov-q{display:block;color:var(--text-muted);font-size:.68rem;line-height:1.45;margin-top:2px;}
+.prov-st{font-family:var(--mono);font-size:.64rem;border:1px solid var(--border);border-radius:4px;padding:2px 6px;white-space:nowrap;color:var(--text-sec);}
+.prov-st.ok{color:var(--ok);border-color:rgba(34,197,94,.4);}
+.prov-st.warn{color:var(--accent);border-color:var(--accent-dim);}
+.prov-st.bad{color:var(--err);border-color:rgba(239,68,68,.45);}
+.prov-st.off{color:var(--text-muted);}
+.prov-raw{display:block;margin-top:6px;font-family:var(--mono);font-size:.62rem;color:var(--text-muted);word-break:break-word;}
+.prov-caps{min-width:120px;}
+.prov-cap{display:block;font-family:var(--mono);font-size:.62rem;color:var(--text-muted);line-height:1.6;white-space:nowrap;}
+.prov-cap.on{color:var(--text-sec);}
+.prov-meter{min-width:90px;}
+.prov-meter .progress{margin:2px 0 4px;}
+.prov-n{font-family:var(--mono);font-size:.64rem;color:var(--text-sec);}
+.data-explainer summary{cursor:pointer;font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:6px;}
+.data-explainer p{margin-top:6px;}
+
+/* Command palette (Ctrl/Cmd+K). A native <dialog>, so focus and Esc are free. */
+.cmdk{width:min(620px,calc(100vw - 24px));max-width:none;margin:12vh auto auto;padding:0;background:var(--bg-card);color:var(--text);
+  border:1px solid var(--border-hi);border-radius:10px;box-shadow:0 24px 70px rgba(0,0,0,.75);}
+.cmdk::backdrop{background:rgba(0,0,0,.55);}
+.cmdk-box{display:flex;flex-direction:column;max-height:min(560px,76vh);}
+.cmdk-q{flex-shrink:0;border:none;border-bottom:1px solid var(--border);border-radius:0;height:auto;min-height:50px;line-height:1.4;font-size:.95rem;padding:14px 16px;background:transparent;width:100%;}
+.cmdk-q:focus{outline:none;box-shadow:none;}
+.cmdk-list{list-style:none;overflow-y:auto;padding:6px;flex:1;min-height:0;}
+.cmdk-group{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);padding:10px 10px 4px;}
+.cmdk-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:.82rem;}
+.cmdk-item.active{background:var(--accent-faint);box-shadow:inset 2px 0 0 var(--accent);}
+.cmdk-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cmdk-hint,.kbd-keys kbd{font-family:var(--mono);font-size:.62rem;color:var(--text-sec);border:1px solid var(--border-hi);border-bottom-width:2px;
+  border-radius:4px;padding:1px 6px;background:var(--bg-elev);}
+.cmdk-empty{padding:16px;color:var(--text-muted);font-size:.78rem;}
+.cmdk-foot{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:.6rem;color:var(--text-muted);}
+/* Keyboard cheat sheet reuses the learn dialog frame. */
+.learn-dlg.kbd-sheet{height:auto;max-height:calc(100vh - 48px);}
+.kbd-body{padding:14px 18px 18px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px 24px;}
+.kbd-body > .field-note{grid-column:1/-1;}
+.kbd-h{font-family:var(--display);font-weight:800;font-size:.85rem;margin-bottom:6px;}
+.kbd-tbl{width:100%;border-collapse:collapse;font-size:.76rem;}
+.kbd-tbl td{padding:5px 0;border-bottom:1px solid var(--border);color:var(--text-sec);vertical-align:middle;}
+.kbd-keys{width:42%;white-space:nowrap;color:var(--text-muted);}
+
+/* Phones: the shared navbar holds every app control. The least-used ones drop
+   out (each is still in Settings or the palette) so the rest stay reachable. */
+@media(max-width:560px){
+  #intervalSel,#btnDisplays,#btnPalette,.cs-header .seg,#carinoNav .cn-actions .seg{display:none;}
+  .lvl-btn .lvl-ico{display:none;}
+  .ack-card{padding:22px 18px;max-height:calc(100vh - 32px);overflow-y:auto;}
+  .ack-brand{font-size:1.4rem;}
+  /* The provider table becomes one card per provider. */
+  .prov-tbl thead{display:none;}
+  .prov-tbl tr{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border);}
+  .prov-tbl th,.prov-tbl td{padding:6px 8px;border-bottom:none;}
+  .prov-tbl .prov-name{grid-column:1/-1;}
+}
+/* Hidden is hidden, whatever display a button class sets. */
+.cs-btn[hidden],.seg-btn[hidden]{display:none !important;}
+
+/* Motion: every transition in the chrome is decoration, so it goes entirely. */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition-duration:0s !important;animation-duration:0s !important;animation-iteration-count:1 !important;scroll-behavior:auto !important;}
 }

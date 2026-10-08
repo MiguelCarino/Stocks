@@ -54,6 +54,11 @@ export const MARKETS = {
 
 const DOW_NAME = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// Labels are resolved through the site dictionary at call time, so the chip, the
+// table column and the session widget follow a language switch on their next
+// render. Identity outside a browser (tests) or before i18n.js has loaded.
+const i18nT = (s) => (typeof window !== 'undefined' && window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+
 const FORMATTERS = new Map();
 
 /* The weekday is deliberately NOT requested. It is fully determined by the
@@ -308,7 +313,7 @@ function lastCloseLabel(p) {
   for (let i = 0; i < SCAN_DAYS; i++) {
     const s = daySchedule(cur.y, cur.m, cur.d, cur.dow);
     if (s.trading && (i > 0 || p.minutes >= s.close)) {
-      return DOW_NAME[cur.dow] + ' ' + pad2(Math.floor(s.close / 60)) + ':' + pad2(s.close % 60);
+      return i18nT(DOW_NAME[cur.dow]) + ' ' + pad2(Math.floor(s.close / 60)) + ':' + pad2(s.close % 60);
     }
     cur = addDays(cur.y, cur.m, cur.d, -1);
   }
@@ -316,15 +321,17 @@ function lastCloseLabel(p) {
 }
 
 const LABEL = {
-  pre: 'Pre-market', open: 'Open', post: 'After hours',
+  // 'Market open', not 'Open': the bare word is a verb in most languages
+  // (Abrir, 開く) and the chip must read as a state.
+  pre: 'Pre-market', open: 'Market open', post: 'After hours',
   closed: 'Closed', weekend: 'Weekend', holiday: 'Holiday',
 };
 
 // Phrased by the state being entered, so the countdown reads as an event.
 const ENTER = {
-  pre: 'Pre-market in ', open: 'Opens in ',
-  post: 'Closes in ', closed: 'After hours ends in ',
-  weekend: 'Weekend in ', holiday: 'Holiday in ',
+  pre: 'Pre-market in', open: 'Opens in',
+  post: 'Closes in', closed: 'After hours ends in',
+  weekend: 'Weekend in', holiday: 'Holiday in',
 };
 
 function equitySession(ms, tz) {
@@ -339,10 +346,10 @@ function equitySession(ms, tz) {
 
   let detail = null;
   if (state === 'holiday') detail = s.hol.name;
-  else if (s.trading && s.earlyClose) detail = 'Early close 13:00';
+  else if (s.trading && s.earlyClose) detail = i18nT('Early close') + ' 13:00';
   else if (!isTradeable) {
     const last = lastCloseLabel(p);
-    if (last) detail = 'Frozen since ' + last;
+    if (last) detail = i18nT('Frozen since') + ' ' + last;
   }
 
   return {
@@ -351,10 +358,10 @@ function equitySession(ms, tz) {
     isTradeable,
     earlyClose: !!(s.trading && s.earlyClose),
     approx: p.y > HOLIDAY_HORIZON || p.y < HOLIDAY_FLOOR,
-    label: LABEL[state],
+    label: i18nT(LABEL[state]),
     detail,
     nextChange: nx ? nx.ms : null,
-    nextLabel: nx ? ENTER[nx.state] + formatCountdown(nx.ms - ms) : null,
+    nextLabel: nx ? i18nT(ENTER[nx.state]) + ' ' + formatCountdown(nx.ms - ms) : null,
     tz,
   };
 }
@@ -365,7 +372,7 @@ function equitySession(ms, tz) {
 function cryptoSession(tz) {
   return {
     state: 'open', isOpen: true, isTradeable: true, earlyClose: false, approx: false,
-    label: 'Crypto 24/7', detail: null, nextChange: null, nextLabel: null, tz,
+    label: i18nT('Crypto 24/7'), detail: null, nextChange: null, nextLabel: null, tz,
   };
 }
 
@@ -394,10 +401,10 @@ function fxSession(ms, tz) {
   return {
     state: shut ? 'weekend' : 'open',
     isOpen: !shut, isTradeable: !shut, earlyClose: false, approx: false,
-    label: shut ? 'Weekend' : 'Open',
-    detail: shut ? 'Frozen since Fri 17:00' : null,
+    label: i18nT(shut ? 'Weekend' : 'Market open'),
+    detail: shut ? i18nT('Frozen since') + ' ' + i18nT('Fri') + ' 17:00' : null,
     nextChange,
-    nextLabel: (shut ? 'Opens in ' : 'Closes in ') + formatCountdown(nextChange - ms),
+    nextLabel: i18nT(shut ? 'Opens in' : 'Closes in') + ' ' + formatCountdown(nextChange - ms),
     tz,
   };
 }
@@ -431,7 +438,7 @@ export function sessionAt(dateOrMs, market = 'US_EQUITY') {
 function unavailable(tz) {
   return {
     state: 'closed', isOpen: false, isTradeable: false, earlyClose: false, approx: true,
-    label: 'Closed', detail: 'Session unavailable', nextChange: null, nextLabel: null, tz,
+    label: i18nT('Closed'), detail: i18nT('Session unavailable'), nextChange: null, nextLabel: null, tz,
   };
 }
 

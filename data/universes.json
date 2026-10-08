@@ -1,0 +1,100 @@
+{
+  "_about": "Bundled symbol lists for the screener, heatmap and movers widgets. A list is a convenience starting point, not an index feed: memberships change, and these were written by hand. Each list says what it is and how it was chosen. Sectors are GICS-style labels used only for grouping.",
+  "lists": [
+    {
+      "id": "us-mega",
+      "label": "US mega caps",
+      "note": "About 25 of the largest US-listed companies by market value, chosen by hand. Not an index and not ranked.",
+      "asOf": "2026-10",
+      "symbols": [
+        ["AAPL", "Technology"], ["MSFT", "Technology"], ["NVDA", "Technology"], ["AVGO", "Technology"], ["ORCL", "Technology"],
+        ["GOOGL", "Communication Services"], ["META", "Communication Services"], ["NFLX", "Communication Services"],
+        ["AMZN", "Consumer Discretionary"], ["TSLA", "Consumer Discretionary"], ["HD", "Consumer Discretionary"],
+        ["BRK.B", "Financials"], ["JPM", "Financials"], ["V", "Financials"], ["MA", "Financials"], ["BAC", "Financials"],
+        ["LLY", "Health Care"], ["UNH", "Health Care"], ["JNJ", "Health Care"], ["ABBV", "Health Care"],
+        ["WMT", "Consumer Staples"], ["COST", "Consumer Staples"], ["PG", "Consumer Staples"],
+        ["XOM", "Energy"], ["CVX", "Energy"]
+      ]
+    },
+    {
+      "id": "dow30",
+      "label": "Dow 30",
+      "note": "Dow Jones Industrial Average members as last known when this list was written (after the November 2024 change). Check the index provider for later changes.",
+      "asOf": "2024-11",
+      "symbols": [
+        ["AAPL", "Technology"], ["MSFT", "Technology"], ["NVDA", "Technology"], ["CSCO", "Technology"], ["IBM", "Technology"], ["CRM", "Technology"],
+        ["AMZN", "Consumer Discretionary"], ["HD", "Consumer Discretionary"], ["MCD", "Consumer Discretionary"], ["NKE", "Consumer Discretionary"],
+        ["DIS", "Communication Services"], ["VZ", "Communication Services"],
+        ["AXP", "Financials"], ["GS", "Financials"], ["JPM", "Financials"], ["TRV", "Financials"], ["V", "Financials"],
+        ["AMGN", "Health Care"], ["JNJ", "Health Care"], ["MRK", "Health Care"], ["UNH", "Health Care"],
+        ["BA", "Industrials"], ["CAT", "Industrials"], ["HON", "Industrials"], ["MMM", "Industrials"],
+        ["KO", "Consumer Staples"], ["PG", "Consumer Staples"], ["WMT", "Consumer Staples"],
+        ["CVX", "Energy"], ["SHW", "Materials"]
+      ]
+    },
+    {
+      "id": "ndx-top",
+      "label": "Nasdaq-100 top",
+      "note": "About 25 of the largest Nasdaq-100 members. A subset, not the full index.",
+      "asOf": "2026-10",
+      "symbols": [
+        ["AAPL", "Technology"], ["MSFT", "Technology"], ["NVDA", "Technology"], ["AVGO", "Technology"], ["AMD", "Technology"],
+        ["ADBE", "Technology"], ["CSCO", "Technology"], ["QCOM", "Technology"], ["TXN", "Technology"], ["INTU", "Technology"],
+        ["AMAT", "Technology"], ["PANW", "Technology"],
+        ["GOOGL", "Communication Services"], ["META", "Communication Services"], ["NFLX", "Communication Services"],
+        ["TMUS", "Communication Services"], ["CMCSA", "Communication Services"],
+        ["AMZN", "Consumer Discretionary"], ["TSLA", "Consumer Discretionary"], ["BKNG", "Consumer Discretionary"],
+        ["COST", "Consumer Staples"], ["PEP", "Consumer Staples"],
+        ["AMGN", "Health Care"], ["ISRG", "Health Care"], ["HON", "Industrials"]
+      ]
+    },
+    {
+      "id": "sector-etf",
+      "label": "US sector ETFs",
+      "note": "The eleven Select Sector SPDR funds plus SPY, one per S&P 500 sector. Useful for a sector heatmap.",
+      "asOf": "2026-10",
+      "symbols": [
+        ["SPY", "Broad market"], ["XLK", "Technology"], ["XLC", "Communication Services"], ["XLY", "Consumer Discretionary"],
+        ["XLP", "Consumer Staples"], ["XLF", "Financials"], ["XLV", "Health Care"], ["XLI", "Industrials"],
+        ["XLE", "Energy"], ["XLB", "Materials"], ["XLU", "Utilities"], ["XLRE", "Real Estate"]
+      ]
+    },
+    {
+      "id": "crypto20",
+      "label": "Crypto top 20",
+      "note": "Twenty large cryptocurrencies by market value, stablecoins left out because they are designed not to move. Coins whose ticker is also a stock use the -USD form.",
+      "asOf": "2026-10",
+      "symbols": [
+        ["BTC", "Crypto"], ["ETH", "Crypto"], ["XRP", "Crypto"], ["BNB", "Crypto"], ["SOL", "Crypto"],
+        ["DOGE", "Crypto"], ["ADA", "Crypto"], ["TRX", "Crypto"], ["AVAX", "Crypto"], ["LINK-USD", "Crypto"],
+        ["TON", "Crypto"], ["DOT", "Crypto"], ["BCH", "Crypto"], ["LTC", "Crypto"], ["XLM", "Crypto"],
+        ["SHIB", "Crypto"], ["HBAR", "Crypto"], ["UNI", "Crypto"], ["SUI", "Crypto"], ["NEAR", "Crypto"]
+      ]
+    },
+    {
+      "id": "fx-majors",
+      "label": "FX majors",
+      "note": "The seven major dollar pairs plus USDMXN and two euro crosses. Spot FX has no consolidated volume.",
+      "asOf": "2026-10",
+      "symbols": [
+        ["EURUSD", "Currency"], ["GBPUSD", "Currency"], ["USDJPY", "Currency"], ["USDCHF", "Currency"], ["AUDUSD", "Currency"],
+        ["USDCAD", "Currency"], ["NZDUSD", "Currency"], ["USDMXN", "Currency"], ["EURGBP", "Currency"], ["EURJPY", "Currency"]
+      ]
+    },
+    {
+      "id": "bmv",
+      "label": "Mexico BMV leaders",
+      "note": "Large companies listed on the Bolsa Mexicana de Valores, priced in MXN, using the .MX suffix. Free providers cover Mexican listings unevenly; a symbol your provider does not cover shows as not covered.",
+      "asOf": "2026-10",
+      "symbols": [
+        ["AMXB.MX", "Communication Services"], ["TLEVISACPO.MX", "Communication Services"],
+        ["WALMEX.MX", "Consumer Staples"], ["FEMSAUBD.MX", "Consumer Staples"], ["BIMBOA.MX", "Consumer Staples"],
+        ["KOFUBL.MX", "Consumer Staples"], ["AC.MX", "Consumer Staples"], ["GRUMAB.MX", "Consumer Staples"], ["KIMBERA.MX", "Consumer Staples"],
+        ["GFNORTEO.MX", "Financials"], ["BOLSAA.MX", "Financials"],
+        ["GMEXICOB.MX", "Materials"], ["CEMEXCPO.MX", "Materials"], ["ORBIA.MX", "Materials"],
+        ["GAPB.MX", "Industrials"], ["ASURB.MX", "Industrials"], ["OMAB.MX", "Industrials"], ["PINFRA.MX", "Industrials"], ["GCARSOA1.MX", "Industrials"],
+        ["ALSEA.MX", "Consumer Discretionary"]
+      ]
+    }
+  ]
+}

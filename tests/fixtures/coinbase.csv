@@ -1,0 +1,10 @@
+You can use this transaction report to inform your likely tax obligations.
+Transactions
+User,someone,abc123
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes
+a1,2024-01-02 10:00:00 UTC,Deposit,USD,1000,USD,$1.00,"$1,000.00","$1,000.00",$0.00,Deposit from bank
+a2,2024-01-16 15:30:00 UTC,Buy,BTC,0.01,USD,"$42,000.00",$420.00,$426.00,$6.00,Bought 0.01 BTC for $426.00 USD
+a3,2024-02-01 00:00:00 UTC,Staking Income,ETH,0.001,USD,"$2,300.00",$2.30,$2.30,$0.00,
+a4,2024-02-10 12:00:00 UTC,Convert,ETH,0.001,USD,"$2,400.00",$2.40,$2.40,$0.00,Converted 0.001 ETH to 0.00005 BTC
+a5,2024-03-01 10:00:00 UTC,Sell,BTC,0.005,USD,"$60,000.00",$300.00,$298.00,$2.00,Sold 0.005 BTC for $298.00 USD
+a6,2024-03-02 10:00:00 UTC,Send,BTC,0.001,USD,"$61,000.00",$61.00,$61.00,$0.00,Sent to 1abc

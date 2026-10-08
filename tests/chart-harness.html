@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chart Harness</title>
+<link rel="stylesheet" href="../fonts/carino-fonts.css" />
+<link rel="stylesheet" href="../css/stocks.css" />
+<link rel="stylesheet" href="../css/chart.css" />
+<style>
+  /* The app itself is dark-only; this light set exists so the chart engine can
+     be checked against a light theme (and so a future light theme has a test). */
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg:#f6f6f4; --bg-elev:#ffffff; --bg-card:#ffffff;
+      --accent:#b58105; --accent-hi:#a16207; --accent-faint:rgba(181,129,5,.07); --accent-dim:rgba(181,129,5,.35);
+      --border:#e2e2de; --border-hi:#cfcfca; --text:#111; --text-sec:#4b4b4b; --text-muted:#8a8a8a;
+      --ok:#16a34a; --warn:#b58105; --err:#dc2626;
+    }
+    :root:not([data-theme="dark"]) .cc-root{ --chart-s2:#2563eb; --chart-s3:#7c3aed; --chart-s4:#db2777; --chart-s5:#0d9488; --chart-s6:#ea580c; }
+  }
+  body{padding:12px 16px;gap:10px;}
+  h1{font-family:var(--display);font-size:1rem;color:var(--text);}
+  .bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+  .bar label{font-family:var(--mono);font-size:.68rem;color:var(--text-sec);display:inline-flex;gap:4px;align-items:center;}
+  .cs-btn,select.cs-btn{background:var(--bg-card);}
+  #main{height:min(62vh,560px);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  #second{height:180px;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  #log{font-family:var(--mono);font-size:.64rem;color:var(--text-muted);min-height:1.2em;white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<h1>Chart engine harness <span style="color:var(--text-muted);font-size:.7rem">synthetic data · no network</span></h1>
+<div class="bar" id="controls">
+  <select class="cs-btn" id="type">
+    <option value="candle">Candles</option><option value="ohlc">OHLC</option><option value="heikin">Heikin-Ashi</option>
+    <option value="line">Line</option><option value="area">Area</option><option value="baseline">Baseline</option>
+  </select>
+  <select class="cs-btn" id="interval"><option value="1d">Daily</option><option value="5m">5 min</option><option value="1w">Weekly</option></select>
+  <label><input type="checkbox" id="log" /> Log</label>
+  <label><input type="checkbox" id="vol" checked /> Volume</label>
+  <label><input type="checkbox" id="cmp" /> Compare</label>
+  <label><input type="checkbox" id="demo" checked /> Demo</label>
+  <select class="cs-btn" id="preset">
+    <option value="trend">Trend: EMA 20/50 + BB + RSI + MACD</option>
+    <option value="clean">Clean</option>
+    <option value="ichi">Ichimoku + SuperTrend + ADX</option>
+    <option value="vol">VWAP + PSAR + Vol MA + OBV + Stoch</option>
+    <option value="pivots">Pivots + Keltner + Donchian + CCI</option>
+  </select>
+  <span class="seg" id="tools">
+    <button class="cs-btn seg-btn" data-tool="">Pointer</button>
+    <button class="cs-btn seg-btn" data-tool="hline">H-line</button>
+    <button class="cs-btn seg-btn" data-tool="trend">Trend</button>
+    <button class="cs-btn seg-btn" data-tool="ray">Ray</button>
+    <button class="cs-btn seg-btn" data-tool="rect">Rect</button>
+    <button class="cs-btn seg-btn" data-tool="fib">Fib</button>
+    <button class="cs-btn seg-btn" data-tool="text">Text</button>
+    <button class="cs-btn seg-btn" data-tool="measure">Measure</button>
+  </span>
+  <button class="cs-btn" data-state="loading">Loading</button>
+  <button class="cs-btn" data-state="error">Error</button>
+  <button class="cs-btn" data-state="empty">Empty</button>
+  <button class="cs-btn" data-state="ready">Ready</button>
+</div>
+<div id="main"></div>
+<div id="second"></div>
+<div id="log"></div>
+
+<script type="module">
+import { createChart } from '../js/chart.js';
+
+// Seeded GBM so screenshots are reproducible run to run.
+function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+function gauss(r) { let u = 0, v = 0; while (!u) u = r(); while (!v) v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+function synth({ n, start, step, price, vol, seed, intraday }) {
+  const r = rng(seed), out = [];
+  let t = start, c = price;
+  while (out.length < n) {
+    const d = new Date(t);
+    const wd = d.getUTCDay();
+    if (step >= 86400000 && step < 7 * 86400000 && (wd === 0 || wd === 6)) { t += step; continue; }
+    if (intraday) {
+      const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+      if (wd === 0 || wd === 6 || mins < 14 * 60 + 30 || mins >= 21 * 60) { t += step; continue; }
+    }
+    const o = c;
+    c = Math.max(0.5, o * Math.exp(vol * gauss(r) + 0.0004));
+    const h = Math.max(o, c) * (1 + Math.abs(gauss(r)) * vol * 0.5);
+    const l = Math.min(o, c) * (1 - Math.abs(gauss(r)) * vol * 0.5);
+    out.push({ t, o, h, l, c, v: Math.round(Math.exp(15 + gauss(r) * 0.45) * (intraday ? 0.05 : 1)) });
+    t += step;
+  }
+  return out;
+}
+const DATA = {
+  '1d': synth({ n: 420, start: Date.UTC(2025, 0, 2), step: 86400000, price: 182, vol: 0.017, seed: 7 }),
+  '5m': synth({ n: 78 * 5, start: Date.UTC(2026, 8, 28, 14, 30), step: 300000, price: 412.3, vol: 0.0022, seed: 11, intraday: true }),
+  '1w': synth({ n: 260, start: Date.UTC(2021, 0, 4), step: 7 * 86400000, price: 0.42, vol: 0.06, seed: 3 }),
+};
+const CMP = {
+  '1d': [{ symbol: 'SPY', bars: synth({ n: 420, start: Date.UTC(2025, 0, 2), step: 86400000, price: 590, vol: 0.009, seed: 21 }) },
+         { symbol: 'QQQ', bars: synth({ n: 420, start: Date.UTC(2025, 0, 2), step: 86400000, price: 510, vol: 0.012, seed: 33 }) }],
+};
+const PRESETS = {
+  clean: [],
+  trend: [{ id: 'ema', params: { period: 20 } }, { id: 'ema', params: { period: 50 } }, { id: 'bb' }, { id: 'rsi' }, { id: 'macd' }],
+  ichi: [{ id: 'ichimoku' }, { id: 'supertrend' }, { id: 'adx' }],
+  vol: [{ id: 'vwap', params: { bands: 1 } }, { id: 'psar' }, { id: 'volma' }, { id: 'obv' }, { id: 'stoch' }],
+  pivots: [{ id: 'pivots' }, { id: 'keltner' }, { id: 'donchian' }, { id: 'cci' }],
+};
+const SYM = { '1d': 'AAPL', '5m': 'MSFT', '1w': 'DOGE-USD' };
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent = s; window.__events.push(s); };
+window.__events = [];
+
+const second = createChart(document.getElementById('second'), {});
+const chart = createChart(document.getElementById('main'), {
+  onDrawingsChange: (d) => { window.__drawings = d; log('drawings: ' + d.length + ' ' + d.map((x) => x.type).join(',')); },
+  onCrosshair: (c) => { second.syncCrosshair(c ? c.t : null); },
+  onLevelDrag: (lv, p) => { log('level drag: ' + lv.label + ' -> ' + p.toFixed(2)); lv.price = p; chart.setLevels(levels()); },
+  onRequestAlert: (p) => log('alert requested at ' + p.toFixed(4)),
+  onViewChange: (v) => { window.__view = v; },
+  onToolChange: (t) => markTool(t),
+});
+window.__chart = chart; window.__second = second;
+
+let alertLevel = { price: 0, label: 'Alert above', kind: 'alert', draggable: true };
+const levels = () => {
+  const b = DATA[cur()];
+  const lastC = b[b.length - 1].c, prev = b[b.length - 2].c;
+  if (!alertLevel.price || alertLevel.iv !== cur()) { alertLevel.price = +(lastC * 1.04).toPrecision(6); alertLevel.iv = cur(); }
+  return [alertLevel,
+    { price: +(lastC * 0.93).toPrecision(6), label: 'Avg cost', kind: 'cost' },
+    { price: prev, label: 'Prev close', kind: 'prevClose' }];
+};
+const $ = (id) => document.getElementById(id);
+const cur = () => $('interval').value;
+function load() {
+  const iv = cur();
+  chart.setData({ bars: DATA[iv], symbol: SYM[iv], currency: 'USD', interval: iv, isDemo: $('demo').checked, source: 'Synthetic' });
+  second.setData({ bars: DATA[iv], symbol: SYM[iv], interval: iv, source: 'Synthetic' });
+  second.setType('line'); second.setVolume(false);
+  second.setIndicators([{ id: 'rsi' }]);
+  chart.setCompare($('cmp').checked && CMP[iv] ? CMP[iv] : []);
+  chart.setLevels(levels());
+}
+function markTool(t) { for (const b of document.querySelectorAll('#tools button')) b.classList.toggle('active', (b.dataset.tool || null) === (t || null)); }
+$('type').onchange = () => chart.setType($('type').value);
+$('interval').onchange = load;
+$('log').onchange = () => chart.setLog($('log').checked);
+$('vol').onchange = () => chart.setVolume($('vol').checked);
+$('cmp').onchange = load;
+$('demo').onchange = load;
+$('preset').onchange = () => chart.setIndicators(PRESETS[$('preset').value]);
+for (const b of document.querySelectorAll('#tools button')) b.onclick = () => { chart.setTool(b.dataset.tool || null); markTool(b.dataset.tool || null); };
+for (const b of document.querySelectorAll('[data-state]')) b.onclick = () => chart.setState(b.dataset.state);
+
+const q = new URLSearchParams(location.search);
+if (q.get('interval')) $('interval').value = q.get('interval');
+if (q.get('type')) $('type').value = q.get('type');
+if (q.get('preset')) $('preset').value = q.get('preset');
+if (q.get('cmp')) $('cmp').checked = true;
+if (q.get('log')) $('log').checked = true;
+load();
+chart.setType($('type').value);
+chart.setLog($('log').checked);
+chart.setIndicators(PRESETS[$('preset').value]);
+chart.setDrawings([
+  { id: 'demo-trend', type: 'trend', points: [{ t: DATA[cur()][Math.floor(DATA[cur()].length * 0.55)].t, p: DATA[cur()][Math.floor(DATA[cur()].length * 0.55)].l }, { t: DATA[cur()][DATA[cur()].length - 12].t, p: DATA[cur()][DATA[cur()].length - 12].l }] },
+]);
+window.__ready = true;
+</script>
+</body>
+</html>

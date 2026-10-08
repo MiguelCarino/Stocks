@@ -12,6 +12,8 @@
        stylesheet. Loaded before the block below, which re-scales that markup for
        this medium and must therefore win on ties. -->
   <link rel="stylesheet" href="css/workspace.css" />
+  <link rel="stylesheet" href="css/chart.css" />
+  <link rel="stylesheet" href="css/learn.css" />
   <style>
     /* Popout-only styling. It lives here rather than in css/stocks.css because a
        detached panel is a different medium from the app: no navbar, no chrome to
@@ -181,6 +183,9 @@
     .po-widget .stat-tile { min-width: clamp(110px, 18vmin, 200px); padding: 1.2vmin 1.6vmin; }
     .po-widget .stat-tile .st-label { font-size: clamp(.52rem, 1.5vmin, .72rem); }
     .po-widget .stat-tile .st-value { font-size: clamp(1rem, 4.2vmin, 2.4rem); line-height: 1.1; }
+    /* Eight money tiles share a row: a wall-display size would clip their figures. */
+    .po-widget .wg-folio .stat-tile .st-value, .po-widget .wg-income .stat-tile .st-value { font-size: clamp(.9rem, 2.6vmin, 1.5rem); white-space: nowrap; }
+    .po-widget .wg-folio .stat-row { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
     .po-widget .table-wrap { flex: 1; min-height: 0; overflow: auto; }
     .po-widget table.data { font-size: clamp(.62rem, 1.9vmin, 1rem); }
     .po-widget table.data th, .po-widget table.data td { padding: .8vmin 1.2vmin; }
@@ -257,6 +262,11 @@
     </footer>
   </div>
 
+  <!-- Language: the same resolver and dictionary as the main window, so widget
+       text in a detached panel follows the fleet language. No navbar here, so
+       carino-lang.js only resolves the preference and injects nothing. -->
+  <script src="carino-lang.js" defer></script>
+  <script src="i18n.js" defer></script>
   <script type="module" src="js/popout.js"></script>
 </body>
 </html>

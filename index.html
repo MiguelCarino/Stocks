@@ -15,12 +15,19 @@
   <!-- After stocks.css, deliberately: the workspace owns its own scrolling and
        stacking rules and must be able to override the card-view ones. -->
   <link rel="stylesheet" href="css/workspace.css" />
+  <!-- The chart engine and the education layer style their own components. -->
+  <link rel="stylesheet" href="css/chart.css" />
+  <link rel="stylesheet" href="css/learn.css" />
 </head>
 <body>
   <!-- App controls; carino-navbar.js relocates this into the shared navbar. -->
   <header class="cs-header" data-carino-strip>
     <div class="cs-right" data-carino-actions>
+      <!-- Below 900px the rail is off-canvas; this is the only way to reach it. -->
+      <button class="cs-btn rail-toggle" id="btnRail" title="Watchlist and search" aria-controls="rail" aria-expanded="false">☰</button>
       <span class="live-chip" id="modeChip" title="Data source">DEMO</span>
+      <!-- Experience level: what is offered first, never what is possible. -->
+      <button class="cs-btn lvl-btn" id="btnLevel" aria-haspopup="dialog" aria-expanded="false" aria-controls="levelPop"><span class="lvl-ico" aria-hidden="true">◐</span><span id="btnLevelTxt">Beginner</span></button>
       <button class="sess-chip" id="sessChip" data-state="closed" title="Market session (this device's clock)">
         <span class="sc-dot"></span><span class="sc-txt" id="sessChipTxt">—</span>
       </button>
@@ -32,17 +39,31 @@
       <button class="cs-btn" id="btnAdd" title="Add ticker">＋</button>
       <!-- Shortcuts to the tab that shows each thing, not a second navigation:
            the workspace tabs own what is on screen. -->
-      <div class="seg" role="group" aria-label="Jump to workspace tab">
+      <div class="seg hdr-tabs-seg" role="group" aria-label="Jump to workspace tab">
         <button class="cs-btn seg-btn active" id="viewWatch" title="Show a tab with the watchlist" data-i18n>Watchlist</button>
         <button class="cs-btn seg-btn" id="viewPort" title="Show a tab with the portfolio" data-i18n>Portfolio</button>
       </div>
-      <button class="cs-btn" id="btnHoldings" title="Holdings — add or edit">💼</button>
+      <button class="cs-btn" id="btnHoldings" title="Transactions — add, edit or import holdings">💼</button>
       <button class="cs-btn" id="btnPrivacy" title="Blur amounts">👁</button>
       <button class="cs-btn" id="btnAlerts" title="Alert rules">🔔</button>
+      <button class="cs-btn" id="btnLearn" title="Learn: lessons and glossary">🎓</button>
+      <button class="cs-btn" id="btnPalette" title="Command palette (Ctrl+K)" hidden>⌘K</button>
       <button class="cs-btn" id="btnDisplays" title="Detached displays">⧉</button>
       <button class="cs-btn" id="btnSettings" title="Settings">⚙</button>
     </div>
   </header>
+
+  <!-- Experience-level popover, anchored to #btnLevel by app.js. -->
+  <div class="level-pop" id="levelPop" role="dialog" aria-labelledby="levelPopTitle" hidden>
+    <div class="level-pop-title" id="levelPopTitle" data-i18n>Experience level</div>
+    <div id="levelPopPicker"></div>
+    <p class="field-note" id="levelPopSummary"></p>
+    <p class="field-note" data-i18n>Switching level changes which tools are offered first. It never moves your widgets or touches your data.</p>
+    <div class="level-pop-acts">
+      <button class="cs-btn sm" id="levelPopLayout">Use this level's starting layout</button>
+      <button class="cs-btn sm" id="levelPopLearn" data-i18n>Lessons</button>
+    </div>
+  </div>
 
   <!-- Shared-link banner: only shown while the watchlist came from the URL hash -->
   <div class="hash-banner" id="hashBanner" hidden>
@@ -88,6 +109,7 @@
         </select>
       </div>
       <div class="rail-list" id="railList"></div>
+      <p class="field-note rail-hint" data-i18n>Click a symbol to link the widgets. Double-click it, or press i, for details.</p>
       <!-- First run: the workspace widgets can only say the list is empty, not
            offer to fill it, so the offer lives beside the list itself. -->
       <div class="rail-empty" id="railEmpty" hidden>
@@ -117,7 +139,7 @@
 
   <!-- Detail drawer -->
   <div class="scrim" id="drawerScrim" hidden></div>
-  <aside class="drawer" id="drawer" hidden aria-hidden="true">
+  <aside class="drawer" id="drawer" hidden aria-hidden="true" role="dialog" aria-labelledby="drawerTitle">
     <div class="drawer-head">
       <div class="drawer-title" id="drawerTitle">—</div>
       <button class="modal-x" id="drawerClose" aria-label="Close">✕</button>
@@ -128,9 +150,24 @@
   <!-- Modals -->
   <div class="modal-scrim" id="modalScrim" hidden>
     <!-- Settings -->
-    <div class="modal" id="settingsModal" hidden>
-      <div class="modal-head"><div class="modal-title" data-i18n>Settings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+    <div class="modal wide" id="settingsModal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-head"><div class="modal-title" id="settingsTitle" data-i18n>Settings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
+        <!-- Experience level and layout templates -->
+        <section class="settings-section first" id="levelSection">
+          <h3 class="section-title" data-i18n>Experience level</h3>
+          <div id="setLevelPicker"></div>
+          <p class="field-note" id="setLevelSummary"></p>
+          <div class="field-row level-layouts">
+            <span class="rail-lbl" data-i18n>Starting layouts</span>
+            <button class="cs-btn sm" data-layout-level="beginner" data-i18n>Beginner layout</button>
+            <button class="cs-btn sm" data-layout-level="standard" data-i18n>Standard layout</button>
+            <button class="cs-btn sm" data-layout-level="pro" data-i18n>Pro layout</button>
+            <button class="cs-btn sm" id="btnKeys" data-i18n>Keyboard shortcuts</button>
+          </div>
+          <p class="field-note" data-i18n>A starting layout replaces your tabs and widgets; your watchlist, transactions, alerts and notes in Settings are kept.</p>
+        </section>
+        <h3 class="section-title" data-i18n>Data provider</h3>
         <p class="field-note" data-i18n>Bring your own free, read-only API keys. They are stored only in this browser and sent only to the provider.</p>
         <div class="field-row">
           <label class="field"><span data-i18n>Provider</span>
@@ -183,13 +220,43 @@
           <label class="chk"><input type="checkbox" id="setNotify" /> <span data-i18n>Browser notifications on alert</span></label>
           <label class="chk"><input type="checkbox" id="setSound" /> <span data-i18n>Sound on alert</span></label>
           <label class="chk"><input type="checkbox" id="setMarket" /> <span data-i18n>Show market-status strip</span></label>
+          <label class="field"><span data-i18n>Market strip symbols</span>
+            <input type="text" class="input" id="setStrip" placeholder="SPY, QQQ, DIA, BTC, EURUSD" autocomplete="off" spellcheck="false" /></label>
+          <p class="field-note" data-i18n>Up to ten symbols, separated by commas. Free data tiers quote funds that track an index (SPY for the S&amp;P 500), not the index itself.</p>
           <label class="chk"><input type="checkbox" id="setPrivacy" /> <span data-i18n>Blur amounts by default</span></label>
         </div>
+        <!-- Portfolio valuation: how totals are converted and how sales use up lots. -->
+        <section class="settings-section" id="portfolioSection">
+          <h3 class="section-title" data-i18n>Portfolio</h3>
+          <div class="field-row">
+            <label class="field"><span data-i18n>Base currency</span>
+              <input type="text" class="input" id="setBaseCcy" maxlength="3" list="setBaseCcyList" autocomplete="off" spellcheck="false" placeholder="USD" /></label>
+            <label class="field"><span data-i18n>Cost method</span>
+              <select class="input" id="setCostMethod">
+                <option value="fifo" data-i18n>FIFO — oldest shares sold first</option>
+                <option value="avg" data-i18n>Average cost</option>
+              </select></label>
+          </div>
+          <datalist id="setBaseCcyList"><option value="USD"></option><option value="EUR"></option><option value="GBP"></option><option value="MXN"></option><option value="BRL"></option><option value="CAD"></option><option value="JPY"></option><option value="CHF"></option><option value="AUD"></option></datalist>
+          <p class="field-note" data-i18n>Totals are converted into the base currency with live FX quotes from your provider. A currency with no rate is listed and left out rather than added at 1:1. The cost method decides which shares a sale uses up, and so the realized gain; check which one your tax authority expects.</p>
+        </section>
         <div class="key-status" id="keyStatus"></div>
         <div class="field-note">
           <a href="https://finnhub.io/register" target="_blank" rel="noopener" data-i18n>Get a Finnhub key ↗</a> ·
           <a href="https://twelvedata.com/pricing" target="_blank" rel="noopener" data-i18n>Get a Twelve Data key ↗</a>
         </div>
+
+        <!-- What each provider supplies, how fresh, how much of the free tier is used. -->
+        <section class="settings-section" id="dataSection">
+          <h3 class="section-title" data-i18n>Data &amp; providers</h3>
+          <div id="provTable"></div>
+          <details class="data-explainer">
+            <summary data-i18n>Data quality: real-time, delayed and end-of-day</summary>
+            <p class="field-note" data-i18n>Real-time means the last trade as it happens. Delayed usually means 15 minutes behind for US stocks on free plans. End-of-day means yesterday's close until the market shuts today. Crypto trades around the clock and FX five days a week, so "closed" means something different for each.</p>
+            <p class="field-note" data-i18n>Stocks labels every number with its source and time, shows a chip when a chart is demo, partial or stale, and never fills a gap with sample data while you are using a live provider.</p>
+            <p class="field-note" data-i18n>Free tiers limit how many requests you can make. The meters above count this browser's requests against each provider's published limits; detached panels reuse this window's data and cost nothing.</p>
+          </details>
+        </section>
 
         <!-- Detached displays: popout windows + Picture-in-Picture -->
         <section class="settings-section" id="displaysSection">
@@ -241,76 +308,215 @@
       </div>
     </div>
 
-    <!-- Alerts -->
-    <div class="modal" id="alertsModal" hidden>
-      <div class="modal-head"><div class="modal-title" data-i18n>Alert rules</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+    <!-- Alerts. The form is built from the ALERT_TYPES registry (alerts-ui.js):
+         the type list follows the experience level, and each type brings its
+         own parameters, comparisons and unit. -->
+    <div class="modal wide" id="alertsModal" hidden>
+      <div class="modal-head"><div class="modal-title" id="alertsTitle" data-i18n>Alert rules</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
-        <div class="rule-add">
-          <select class="input" id="ruleSym"></select>
-          <select class="input" id="ruleType"><option value="price" data-i18n>Price</option><option value="pct" data-i18n>Change %</option></select>
-          <select class="input" id="ruleOp"><option value="above">≥</option><option value="below">≤</option></select>
-          <input type="number" class="input" id="ruleVal" placeholder="value" step="any" />
-          <button class="btn-primary" id="ruleAdd" data-i18n>Add</button>
+        <p class="field-note" data-i18n>Alerts watch prices while a Stocks tab is open and tell you when a condition is met. They never place orders.</p>
+        <div class="al-form" id="ruleForm">
+          <div class="al-row">
+            <label class="field"><span data-i18n>Symbol</span><select class="input" id="ruleSym"></select></label>
+            <label class="field al-type"><span data-i18n>Condition</span>
+              <span class="al-type-row"><select class="input" id="ruleType"></select><span id="ruleTypeHelp"></span></span></label>
+          </div>
+          <div class="al-params" id="ruleParams"></div>
+          <div class="al-row">
+            <label class="field"><span data-i18n>When it is</span><select class="input" id="ruleOp"></select></label>
+            <label class="field"><span id="ruleValLbl" data-i18n>Value</span>
+              <span class="al-val-row"><input type="number" class="input" id="ruleVal" placeholder="value" step="any" /><span class="al-unit" id="ruleUnit"></span></span></label>
+          </div>
+          <p class="al-preview" id="rulePreview" aria-live="polite"></p>
+          <details class="al-more" id="ruleMore">
+            <summary data-i18n>More options</summary>
+            <div class="al-row">
+              <label class="field"><span data-i18n>Session scope</span>
+                <select class="input" id="ruleSess">
+                  <option value="regular" data-i18n>Regular hours only</option>
+                  <option value="extended" data-i18n>Include extended hours</option>
+                  <option value="any" data-i18n>Any session</option>
+                </select></label>
+              <label class="field"><span data-i18n>After it fires</span>
+                <select class="input" id="ruleRepeat">
+                  <option value="rearm" data-i18n>Re-arm when the condition clears</option>
+                  <option value="once" data-i18n>Fire once, then switch off</option>
+                </select></label>
+            </div>
+            <div class="al-row">
+              <label class="field"><span data-i18n>Expires (optional)</span><input type="date" class="input" id="ruleExpires" /></label>
+              <label class="field"><span data-i18n>Note (optional)</span><input type="text" class="input" id="ruleNote" maxlength="200" autocomplete="off" /></label>
+            </div>
+            <p class="field-note" id="ruleSessNote"></p>
+          </details>
+          <div class="al-acts">
+            <span class="field-note warn-note" id="ruleErr" hidden></span>
+            <span class="spacer"></span>
+            <button class="cs-btn" id="ruleCancel" hidden data-i18n>Cancel edit</button>
+            <button class="btn-primary" id="ruleAdd" data-i18n>Add alert</button>
+          </div>
         </div>
-        <label class="field"><span data-i18n>Session scope</span>
-          <select class="input" id="ruleSess">
-            <option value="regular" data-i18n>Regular hours only</option>
-            <option value="extended" data-i18n>Include extended hours</option>
-            <option value="any" data-i18n>Any session</option>
-          </select></label>
-        <p class="field-note" id="ruleSessNote"></p>
+        <div class="log-head">
+          <span class="rail-lbl" data-i18n>Your rules</span>
+          <select class="cs-select sm" id="ruleFilter" title="Show rules">
+            <option value="" data-i18n>All rules</option>
+            <option value="armed" data-i18n>Armed</option>
+            <option value="off" data-i18n>Switched off</option>
+          </select>
+        </div>
         <div class="rule-list" id="ruleList"></div>
         <div class="log-head">
           <span class="rail-lbl" data-i18n>Recently triggered</span>
           <select class="cs-select sm" id="logFilter" title="Filter by symbol"><option value="" data-i18n>All symbols</option></select>
+          <select class="cs-select sm" id="logRange" title="Filter by time">
+            <option value="" data-i18n>Any time</option>
+            <option value="1" data-i18n>Last 24 hours</option>
+            <option value="7" data-i18n>Last 7 days</option>
+            <option value="30" data-i18n>Last 30 days</option>
+          </select>
           <button class="cs-btn" id="btnLogCsv" title="Download the alert log as CSV">CSV</button>
+          <button class="cs-btn danger" id="btnLogClear" title="Clear the alert log" data-i18n>Clear</button>
         </div>
         <div class="alert-log" id="alertLog"></div>
       </div>
     </div>
 
-    <!-- Holdings list. The Portfolio widget reports the numbers; widgets are
-         readers and may not write to storage, so adding, editing and deleting a
-         holding happens here. -->
-    <div class="modal" id="holdingsModal" hidden>
-      <div class="modal-head"><div class="modal-title" data-i18n>Holdings</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+    <!-- Transactions. The ledger is the portfolio's source of truth: every
+         figure the portfolio widgets show is replayed from these rows. -->
+    <div class="modal wide xl" id="ledgerModal" hidden>
+      <div class="modal-head"><div class="modal-title" data-i18n>Transactions</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
-        <p class="field-note" data-i18n>Positions you enter by hand. Nothing here is connected to a brokerage — Stocks cannot see your account and cannot place a trade.</p>
-        <!-- Only shown when holdings span more than one currency: the totals are
-             a plain sum and must say so rather than pick a symbol. -->
-        <p class="field-note warn-note" id="holdCurNote" hidden></p>
-        <div class="table-wrap">
-          <table class="data" id="holdTable">
+        <p class="field-note" data-i18n>Buys, sells, dividends and cash you record by hand or import from a broker file. Nothing here is connected to a brokerage — Stocks cannot see your account and cannot place a trade.</p>
+        <p class="field-note warn-note" id="ledMigNote" hidden></p>
+        <div class="led-filters">
+          <select class="cs-select sm" id="ledFSym" title="Filter by symbol"></select>
+          <select class="cs-select sm" id="ledFType" title="Filter by type"></select>
+          <select class="cs-select sm" id="ledFAcct" title="Filter by account"></select>
+          <label class="led-date"><span data-i18n>From</span><input type="date" class="input sm" id="ledFFrom" /></label>
+          <label class="led-date"><span data-i18n>To</span><input type="date" class="input sm" id="ledFTo" /></label>
+          <span class="spacer"></span>
+          <span class="field-note" id="ledCount"></span>
+        </div>
+        <div class="table-wrap led-wrap">
+          <table class="data led-table" id="ledTable">
             <thead><tr>
-              <th data-i18n>Symbol</th><th class="num" data-i18n>Shares</th><th class="num" data-i18n>Avg Cost</th>
-              <th class="num" data-i18n>Last</th><th class="num" data-i18n>Mkt Value</th><th></th>
+              <th data-i18n>Date</th><th data-i18n>Type</th><th data-i18n>Symbol</th><th class="num" data-i18n>Qty</th>
+              <th class="num" data-i18n>Price</th><th class="num" data-i18n>Amount</th><th class="num" data-i18n>Fee</th>
+              <th data-i18n>Ccy</th><th data-i18n>Account</th><th data-i18n>Note</th><th></th>
             </tr></thead>
-            <tbody id="holdBody"></tbody>
+            <tbody id="ledBody"></tbody>
           </table>
         </div>
+        <div class="led-issues" id="ledIssues" hidden></div>
+        <details class="led-realized" id="ledRealized">
+          <summary data-i18n>Realized gains and losses</summary>
+          <p class="field-note" data-i18n>Each sale matched against the shares it used up, by the cost method in Settings. Informational, not tax advice: no wash-sale or local tax rules are applied.</p>
+          <div class="table-wrap"><table class="data led-table" id="ledRealTable">
+            <thead><tr><th data-i18n>Sold</th><th data-i18n>Symbol</th><th class="num" data-i18n>Qty</th><th data-i18n>Bought</th>
+              <th class="num" data-i18n>Cost</th><th class="num" data-i18n>Proceeds</th><th class="num" data-i18n>Gain</th><th data-i18n>Term</th></tr></thead>
+            <tbody id="ledRealBody"></tbody>
+          </table></div>
+          <button class="cs-btn sm" id="ledRealCsv" data-i18n>Download realized CSV</button>
+        </details>
       </div>
       <div class="modal-foot">
+        <button class="cs-btn" id="ledImport" data-i18n>Import CSV</button>
+        <button class="cs-btn" id="ledExport" title="Download every transaction as CSV" data-i18n>Export CSV</button>
+        <button class="cs-btn" id="ledExportPos" title="Download current positions as CSV" data-i18n>Positions CSV</button>
         <span class="spacer"></span>
-        <button class="btn-primary" id="addHolding" data-i18n>＋ Add holding</button>
+        <button class="btn-primary" id="ledAdd" data-i18n>＋ Add transaction</button>
       </div>
     </div>
 
-    <!-- Holding editor -->
-    <div class="modal" id="holdingModal" hidden>
-      <div class="modal-head"><div class="modal-title" id="holdingTitle" data-i18n>Add holding</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+    <!-- One transaction. Beginners see the short "add a holding" form; every
+         field is one click away under "More options". -->
+    <div class="modal" id="txnModal" hidden>
+      <div class="modal-head"><div class="modal-title" id="txnTitle" data-i18n>Add transaction</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
       <div class="modal-body">
-        <label class="field"><span data-i18n>Symbol</span><input type="text" class="input" id="holdSym" autocomplete="off" /></label>
-        <div class="field-row">
-          <label class="field"><span data-i18n>Shares</span><input type="number" class="input" id="holdShares" step="any" /></label>
-          <label class="field"><span data-i18n>Cost</span><input type="number" class="input" id="holdCost" step="any" /></label>
-          <label class="field"><span data-i18n>Basis</span><select class="input" id="holdMode"><option value="per" data-i18n>Per share</option><option value="total" data-i18n>Total</option></select></label>
+        <div class="field-row tx-type-row">
+          <label class="field"><span data-i18n>Type</span><select class="input" id="txType"></select></label>
+          <label class="field"><span data-i18n>Date</span><input type="date" class="input" id="txDate" /></label>
         </div>
-        <label class="field"><span data-i18n>Note (optional)</span><input type="text" class="input" id="holdNote" autocomplete="off" /></label>
+        <p class="field-note" id="txHint"></p>
+        <label class="field tx-f" data-for="symbol"><span data-i18n>Symbol</span>
+          <input type="text" class="input" id="txSym" autocomplete="off" spellcheck="false" placeholder="AAPL" /></label>
+        <div class="field-row">
+          <label class="field tx-f" data-for="qty"><span id="txQtyLbl" data-i18n>Quantity</span><input type="number" class="input" id="txQty" step="any" min="0" /></label>
+          <label class="field tx-f" data-for="price"><span id="txPriceLbl" data-i18n>Price per share</span><input type="number" class="input" id="txPrice" step="any" min="0" /></label>
+          <label class="field tx-f" data-for="amount"><span id="txAmountLbl" data-i18n>Amount</span><input type="number" class="input" id="txAmount" step="any" /></label>
+          <label class="field tx-f" data-for="ratio"><span data-i18n>Split ratio (new per old)</span><input type="number" class="input" id="txRatio" step="any" min="0" placeholder="4" /></label>
+        </div>
+        <details class="tx-more" id="txMore">
+          <summary data-i18n>More options</summary>
+          <div class="field-row">
+            <label class="field tx-f" data-for="fee"><span data-i18n>Fee / commission</span><input type="number" class="input" id="txFee" step="any" min="0" /></label>
+            <label class="field"><span data-i18n>Currency</span><input type="text" class="input" id="txCcy" maxlength="3" autocomplete="off" spellcheck="false" placeholder="USD" /></label>
+            <label class="field"><span data-i18n>Account</span><input type="text" class="input" id="txAcct" maxlength="40" autocomplete="off" list="txAcctList" /></label>
+          </div>
+          <datalist id="txAcctList"></datalist>
+          <label class="chk tx-f" data-for="short"><input type="checkbox" id="txShort" /> <span data-i18n>This is a deliberate short sale</span></label>
+          <label class="field"><span data-i18n>Note (optional)</span><input type="text" class="input" id="txNote" maxlength="200" autocomplete="off" /></label>
+        </details>
+        <p class="field-note" id="txPreview"></p>
+        <p class="field-note warn-note" id="txErr" hidden></p>
       </div>
       <div class="modal-foot">
-        <button class="cs-btn danger" id="holdDelete" hidden data-i18n>Delete</button>
+        <button class="cs-btn danger" id="txDelete" hidden data-i18n>Delete</button>
+        <button class="cs-btn" id="txBack" data-i18n>All transactions</button>
         <span class="spacer"></span>
-        <button class="btn-primary" id="holdSave" data-i18n>Save</button>
+        <button class="btn-primary" id="txSave" data-i18n>Save</button>
+      </div>
+    </div>
+
+    <!-- Broker CSV import: file → detected format → column check → preview →
+         import. The file is read in this page and never uploaded. -->
+    <div class="modal wide xl" id="importModal" hidden>
+      <div class="modal-head"><div class="modal-title" data-i18n>Import transactions from CSV</div><button class="modal-x" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <div class="imp-drop" id="impDrop" tabindex="0" role="button" aria-controls="impFile">
+          <strong data-i18n>Drop a CSV export here, or click to choose a file</strong>
+          <span class="field-note" data-i18n>Read in this page only — the file is never uploaded. Supported: Interactive Brokers, Schwab, Fidelity, Vanguard, Robinhood, eToro, Trading 212, Degiro, GBM+, Bitso, Coinbase, Kraken and a generic format.</span>
+          <span class="field-note imp-file" id="impFileName"></span>
+        </div>
+        <input type="file" id="impFile" accept=".csv,.txt,.tsv,text/csv,text/plain" hidden />
+        <div class="imp-step" id="impStep2" hidden>
+          <div class="field-row imp-opts">
+            <label class="field"><span data-i18n>File format</span><select class="input" id="impPreset"></select></label>
+            <label class="field"><span data-i18n>Decimal mark</span>
+              <select class="input" id="impDecimal">
+                <option value="" data-i18n>Detect</option><option value=".">1,234.56</option><option value=",">1.234,56</option>
+              </select></label>
+            <label class="field"><span data-i18n>Date order</span>
+              <select class="input" id="impDateOrder">
+                <option value="" data-i18n>Detect</option><option value="MDY" data-i18n>Month/Day/Year</option>
+                <option value="DMY" data-i18n>Day/Month/Year</option>
+              </select></label>
+          </div>
+          <div class="field-row imp-opts">
+            <label class="field"><span data-i18n>Currency when the file has none</span><input type="text" class="input" id="impCcy" maxlength="3" placeholder="USD" /></label>
+            <label class="field"><span data-i18n>Account name (optional)</span><input type="text" class="input" id="impAcct" maxlength="40" /></label>
+          </div>
+          <details class="imp-map" id="impMapBox">
+            <summary data-i18n>Check or change the column mapping</summary>
+            <p class="field-note" data-i18n>Pick which column of your file holds each field. Changing any of these switches to a custom mapping.</p>
+            <div class="imp-map-grid" id="impMap"></div>
+          </details>
+          <p class="imp-summary" id="impSummary"></p>
+          <div class="imp-warn" id="impWarn"></div>
+          <div class="table-wrap imp-prev-wrap">
+            <table class="data led-table" id="impPrev">
+              <thead><tr><th></th><th data-i18n>Date</th><th data-i18n>Type</th><th data-i18n>Symbol</th><th class="num" data-i18n>Qty</th>
+                <th class="num" data-i18n>Price</th><th class="num" data-i18n>Amount</th><th class="num" data-i18n>Fee</th><th data-i18n>Ccy</th></tr></thead>
+              <tbody id="impPrevBody"></tbody>
+            </table>
+          </div>
+          <div class="imp-errs" id="impErrs"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="cs-btn" id="impBack" data-i18n>All transactions</button>
+        <span class="spacer"></span>
+        <button class="btn-primary" id="impGo" disabled data-i18n>Import</button>
       </div>
     </div>
   </div>
@@ -326,10 +532,22 @@
 
   <!-- First-load acknowledgment gate -->
   <div class="ack-gate" id="ackGate" hidden>
-    <div class="ack-card">
-      <div class="ack-brand">Carino <span>Stocks</span></div>
-      <p class="ack-text" id="ackText"></p>
-      <button class="btn-primary" id="ackBtn" data-i18n>I understand — continue</button>
+    <div class="ack-card" role="dialog" aria-modal="true" aria-labelledby="ackBrand">
+      <div class="ack-brand" id="ackBrand">Carino <span>Stocks</span></div>
+      <div class="ack-step" id="ackStep1">
+        <p class="ack-text" id="ackText"></p>
+        <button class="btn-primary" id="ackBtn" data-i18n>I understand — continue</button>
+      </div>
+      <!-- Step 2, first run only: how much of the tool to show first. -->
+      <div class="ack-step" id="ackStep2" hidden>
+        <h2 class="ack-q" id="ackQ" data-i18n>How familiar are you with markets?</h2>
+        <div class="ack-levels" role="group" aria-labelledby="ackQ">
+          <button class="ack-lv" data-level="beginner"><strong data-i18n>I'm new to this</strong><span data-i18n>Plain explanations, a simple layout and a one-minute guided tour.</span></button>
+          <button class="ack-lv" data-level="standard"><strong data-i18n>I follow the markets</strong><span data-i18n>Candle charts with indicators, more alert types, a transaction ledger and research widgets.</span></button>
+          <button class="ack-lv" data-level="pro"><strong data-i18n>I trade or analyse actively</strong><span data-i18n>A dense layout with a screener, several charts, risk metrics and a command palette (Ctrl+K).</span></button>
+        </div>
+        <p class="field-note" data-i18n>You can change this any time from the level button in the header. It only changes what is shown first; nothing is locked away.</p>
+      </div>
     </div>
   </div>
 

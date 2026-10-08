@@ -34,6 +34,8 @@
 
 import { store, normalizeSymbol } from './store.js';
 import { WIDGETS, createWidget, widgetMeta } from './widgets.js';
+// One table of which popout panel hosts which widget kind, owned by displays.js.
+import { panelForWidget } from './displays.js';
 
 const COLS = 12;
 const MAX_ROW = 200;          // a runaway push-down cascade must terminate somewhere
@@ -41,14 +43,6 @@ const SAVE_MS = 400;          // debounce: a drag is hundreds of pointermoves, n
 const DRAG_SLOP = 5;          // px before a press on a tab or header becomes a drag rather than a click
 const FALLBACK_ROW_H = 68;
 const FALLBACK_GAP = 12;
-
-// Which popout panel hosts which widget kind. The panel ids are the ones
-// displays.js has always had, so a stored popout config keeps working; the kind
-// travels alongside so the panel knows what to draw.
-const PANEL_FOR_KIND = {
-  cards: 'board', table: 'board', chart: 'board', alerts: 'board',
-  quote: 'ticker', portfolio: 'portfolio', session: 'portfolio', tape: 'strip',
-};
 
 const el = (tag, cls, txt) => {
   const e = document.createElement(tag);
@@ -136,7 +130,63 @@ function freeSlot(tab, w, h) {
 
 /* ---- persisted shape ------------------------------------------------------ */
 
-function defaultWorkspace() {
+/* One starting layout per experience level. A template is only ever applied on
+   a fresh workspace or when the user explicitly asks for it ("Reset to the Pro
+   layout"): switching level never rearranges a layout someone built by hand.
+   - beginner: few widgets, each explained — the watchlist as cards, one chart
+     that follows the selection, tips and lessons beside them.
+   - standard: the pre-level default, kept exactly so an existing user opening a
+     reset recognises it — watchlist cards, a markets tab, the money tab.
+   - pro: density first — tape, table, two charts (one pinned to SPY), alerts,
+     and full research and portfolio tabs. */
+export const LAYOUT_LEVELS = ['beginner', 'standard', 'pro'];
+
+function levelNow() {
+  const lv = safe(() => store.settings.level, 'standard');
+  return LAYOUT_LEVELS.includes(lv) ? lv : 'standard';
+}
+
+function defaultWorkspace(level) {
+  const lv = LAYOUT_LEVELS.includes(level) ? level : levelNow();
+  const W = (kind, col, row, w, h, linked = false, symbol = null) => ({ id: mintId('w'), kind, symbol, linked, col, row, w, h });
+  const T = (name, widgets) => ({ id: mintId('t'), name, widgets });
+
+  if (lv === 'beginner') {
+    // No session widget: the header chip and the market strip already say
+    // whether the market is open, and a beginner's first screen should be prices.
+    const start = T('Start here', [
+      W('cards', 1, 1, 8, 6), W('learn', 9, 1, 4, 6),
+      W('chart', 1, 7, 8, 6, true), W('glossary', 9, 7, 4, 6),
+    ]);
+    const money = T('My money', [
+      W('portfolio', 1, 1, 8, 6), W('allocation', 9, 1, 4, 6),
+      W('alerts', 1, 7, 6, 4), W('notes', 7, 7, 6, 4),
+    ]);
+    const research = T('Research', [
+      W('news', 1, 1, 6, 7, true), W('fundamentals', 7, 1, 6, 7, true),
+    ]);
+    return { v: 1, activeTab: start.id, tabs: [start, money, research] };
+  }
+
+  if (lv === 'pro') {
+    const desk = T('Desk', [
+      W('tape', 1, 1, COLS, 1),
+      W('table', 1, 2, 7, 7), W('chart', 8, 2, 5, 7, true),
+      W('chart', 1, 9, 4, 6, false, 'SPY'), W('fundamentals', 5, 9, 4, 6, true), W('alerts', 9, 9, 4, 6),
+    ]);
+    const mkts = T('Markets', [
+      W('screener', 1, 1, COLS, 7),
+      W('heatmap', 1, 8, 6, 6), W('movers', 7, 8, 3, 6), W('calendar', 10, 8, 3, 6),
+      W('news', 1, 14, 6, 6, true), W('compare', 7, 14, 6, 6, true),
+    ]);
+    const money = T('Portfolio', [
+      W('portfolio', 1, 1, 8, 7), W('allocation', 9, 1, 4, 7),
+      W('performance', 1, 8, 8, 7), W('income', 9, 8, 4, 7),
+      W('calculator', 1, 15, 5, 7), W('notes', 6, 15, 7, 7),
+    ]);
+    return { v: 1, activeTab: desk.id, tabs: [desk, mkts, money] };
+  }
+
   const sess = meta('session'), cards = meta('cards'), port = meta('portfolio');
   const sh = Math.max(sess.minH, Math.min(sess.defaultH, 3));
   // Reproduces the pre-workspace app: the cards grid full width with the session
@@ -150,14 +200,29 @@ function defaultWorkspace() {
         h: Math.max(cards.minH, cards.defaultH, 6) },
     ],
   };
+  // The money tab: positions beside where they sit, then how they did and what
+  // they pay. A new user lands on the empty-state offers in each.
   const folio = {
     id: mintId('t'), name: 'Portfolio',
     widgets: [
-      { id: mintId('w'), kind: 'portfolio', symbol: null, linked: false, col: 1, row: 1, w: COLS,
+      { id: mintId('w'), kind: 'portfolio', symbol: null, linked: false, col: 1, row: 1, w: 8,
         h: Math.max(port.minH, port.defaultH, 6) },
+      { id: mintId('w'), kind: 'allocation', symbol: null, linked: false, col: 9, row: 1, w: 4, h: 6 },
+      { id: mintId('w'), kind: 'performance', symbol: null, linked: false, col: 1, row: 7, w: 8, h: 7 },
+      { id: mintId('w'), kind: 'income', symbol: null, linked: false, col: 9, row: 7, w: 4, h: 7 },
     ],
   };
-  return { v: 1, activeTab: watch.id, tabs: [watch, folio] };
+  // Charts and discovery on a tab of their own, so a new user finds them without
+  // knowing the widget picker exists. Linked widgets follow the selected symbol.
+  const markets = {
+    id: mintId('t'), name: 'Markets',
+    widgets: [
+      W('chart', 1, 1, 8, 7, true), W('news', 9, 1, 4, 7, true),
+      W('heatmap', 1, 8, 6, 5), W('movers', 7, 8, 3, 5), W('calendar', 10, 8, 3, 5),
+      W('screener', 1, 13, COLS, 6),
+    ],
+  };
+  return { v: 1, activeTab: watch.id, tabs: [watch, markets, folio] };
 }
 
 function uniqueId(raw, prefix, seen) {
@@ -272,8 +337,8 @@ function paintSaveNote() {
   // a wrong sentence waiting for the next stylesheet to reveal it.
   if (!saveRefused) { saveNote.textContent = ''; return; }
   saveNote.textContent = safe(() => store.hashActive, false)
-    ? 'Layout changes are not saved while you are viewing a shared link.'
-    : 'Layout changes could not be saved — this browser refused the write.';
+    ? i18nT('Layout changes are not saved while you are viewing a shared link.')
+    : i18nT('Layout changes could not be saved — this browser refused the write.');
 }
 
 /* ---- grid metrics ---------------------------------------------------------
@@ -372,22 +437,22 @@ function createFrame(w) {
   const head = el('header', 'wk-w-head');
   const grip = el('button', 'wk-w-grip', '⠿');
   grip.type = 'button';
-  grip.title = 'Move — drag, or arrow keys';
-  grip.setAttribute('aria-label', 'Move ' + m.label + ' widget');
+  grip.title = i18nT('Move — drag, or arrow keys');
+  grip.setAttribute('aria-label', i18nT('Move widget') + ': ' + i18nT(m.label));
   // Pointer events only work on a surface the browser is not also panning.
   grip.style.touchAction = 'none';
   head.appendChild(grip);
-  head.appendChild(el('span', 'wk-w-title', m.label));
+  head.appendChild(el('span', 'wk-w-title', i18nT(m.label)));
   head.appendChild(el('span', 'spacer'));
 
   let symSel = null, linkBtn = null;
   if (m.needsSymbol) {
     symSel = el('select', 'cs-select sm wk-w-sym');
-    symSel.setAttribute('aria-label', 'Symbol for ' + m.label + ' widget');
+    symSel.setAttribute('aria-label', i18nT('Symbol for widget') + ': ' + i18nT(m.label));
     symSel.addEventListener('change', () => { workspace.setWidgetSymbol(w.id, symSel.value); });
     head.appendChild(symSel);
 
-    linkBtn = el('button', 'icon-mini wk-w-link', 'Link');
+    linkBtn = el('button', 'icon-mini wk-w-link', i18nT('Link'));
     linkBtn.type = 'button';
     linkBtn.addEventListener('click', () => { workspace.setWidgetLink(w.id, !w.linked); });
     head.appendChild(linkBtn);
@@ -395,8 +460,8 @@ function createFrame(w) {
 
   const pop = el('button', 'icon-mini wk-w-pop', '⧉');
   pop.type = 'button';
-  pop.title = 'Pop out to another window';
-  pop.setAttribute('aria-label', 'Pop out ' + m.label + ' widget');
+  pop.title = i18nT('Pop out to another window');
+  pop.setAttribute('aria-label', i18nT('Pop out widget') + ': ' + i18nT(m.label));
   // Warm the module on press, not on click: displays.open() needs the click's
   // transient activation, and awaiting a cold import first can spend it.
   pop.addEventListener('pointerdown', () => { loadDisplays(); });
@@ -405,8 +470,8 @@ function createFrame(w) {
 
   const kill = el('button', 'icon-mini wk-w-x', '✕');
   kill.type = 'button';
-  kill.title = 'Remove widget';
-  kill.setAttribute('aria-label', 'Remove ' + m.label + ' widget');
+  kill.title = i18nT('Remove widget');
+  kill.setAttribute('aria-label', i18nT('Remove widget') + ': ' + i18nT(m.label));
   kill.addEventListener('click', () => { workspace.removeWidget(w.id); });
   head.appendChild(kill);
 
@@ -414,8 +479,8 @@ function createFrame(w) {
 
   const size = el('button', 'wk-w-size');
   size.type = 'button';
-  size.title = 'Resize — drag, or arrow keys';
-  size.setAttribute('aria-label', 'Resize ' + m.label + ' widget');
+  size.title = i18nT('Resize — drag, or arrow keys');
+  size.setAttribute('aria-label', i18nT('Resize widget') + ': ' + i18nT(m.label));
   size.style.touchAction = 'none';
 
   wrap.appendChild(head);
@@ -443,7 +508,7 @@ function createFrame(w) {
 
   // A widget that throws in its constructor must not take the tab down with it.
   try { f.inst = createWidget(w.kind, body, forWidget(decorate(ctx()), w)); }
-  catch (e) { f.inst = null; body.appendChild(el('p', 'wk-w-fail', 'This widget failed to load.')); }
+  catch (e) { f.inst = null; body.appendChild(el('p', 'wk-w-fail', i18nT('This widget failed to load.'))); }
   if (m.needsSymbol) pushSymbol(w);
   return f;
 }
@@ -490,6 +555,17 @@ function renderEmpty(tab) {
   grid.appendChild(box);
 }
 
+/* ---- crosshair link bus ----------------------------------------------------
+   A few listeners and a function call per pointer move — deliberately not the
+   peers mesh: a crosshair is per window, and broadcasting every hover to every
+   other tab would be noise. The sender's id rides along so a chart ignores its
+   own echo. */
+const crossSubs = new Set();
+const linkBus = {
+  emit(t, src) { for (const fn of [...crossSubs]) safe(() => fn(t, src)); },
+  on(fn) { if (typeof fn !== 'function') return () => {}; crossSubs.add(fn); return () => crossSubs.delete(fn); },
+};
+
 /* ---- ctx ------------------------------------------------------------------ */
 
 function ctx() {
@@ -521,6 +597,9 @@ function forWidget(shared, w) {
   return {
     ...shared,
     widgetState: w.state || null,
+    // Linked widgets share one crosshair: a chart hovered at a date shows the
+    // same date on every other linked chart. Pinned widgets keep their own.
+    linkBus: w.linked ? linkBus : null,
     onWidgetState(next) {
       const keep = (next && typeof next === 'object' && !Array.isArray(next)) ? next : null;
       if (keep) w.state = keep; else delete w.state;
@@ -557,9 +636,9 @@ function syncHeader(f, w, c) {
     f.linkBtn.setAttribute('aria-pressed', w.linked ? 'true' : 'false');
     f.linkBtn.classList.toggle('active', !!w.linked);
     f.linkBtn.title = w.linked
-      ? 'Linked to the workspace symbol — click to pin ' + (cur || 'this widget')
-      : 'Pinned to ' + (cur || 'no symbol') + ' — click to follow the workspace symbol';
-    f.linkBtn.setAttribute('aria-label', (w.linked ? 'Unlink ' : 'Link ') + m.label + ' widget');
+      ? i18nT('Linked to the workspace symbol — click to pin it') + (cur ? ' (' + cur + ')' : '')
+      : i18nT('Pinned') + ' (' + (cur || '—') + ') — ' + i18nT('click to follow the workspace symbol');
+    f.linkBtn.setAttribute('aria-label', i18nT(w.linked ? 'Unlink widget' : 'Link widget') + ': ' + i18nT(m.label));
   }
 }
 
@@ -576,14 +655,14 @@ function renderTabs() {
     item.setAttribute('role', 'presentation');
     item.dataset.id = t.id;
 
-    const btn = el('button', 'wk-tab-btn', t.name);
+    const btn = el('button', 'wk-tab-btn', i18nT(t.name));
     btn.type = 'button';
     btn.id = 'wk-tab-' + t.id;
     btn.setAttribute('role', 'tab');
     btn.setAttribute('aria-selected', active ? 'true' : 'false');
     btn.setAttribute('aria-controls', 'wk-panel');
     btn.tabIndex = active ? 0 : -1;
-    btn.title = t.name + ' — double-click to rename';
+    btn.title = i18nT(t.name) + ' — ' + i18nT('double-click to rename');
     btn.style.touchAction = 'none';
     btn.addEventListener('click', () => workspace.setActiveTab(t.id));
     btn.addEventListener('dblclick', () => beginRename(t.id));
@@ -593,8 +672,8 @@ function renderTabs() {
 
     const x = el('button', 'wk-tab-x', '✕');
     x.type = 'button';
-    x.title = 'Delete tab';
-    x.setAttribute('aria-label', 'Delete tab ' + t.name);
+    x.title = i18nT('Delete tab');
+    x.setAttribute('aria-label', i18nT('Delete tab') + ' ' + i18nT(t.name));
     x.addEventListener('click', (ev) => { ev.stopPropagation(); workspace.removeTab(t.id); });
     item.appendChild(x);
 
@@ -602,8 +681,8 @@ function renderTabs() {
   }
   const add = el('button', 'wk-tab-add', '＋');
   add.type = 'button';
-  add.title = 'New tab';
-  add.setAttribute('aria-label', 'New tab');
+  add.title = i18nT('New tab');
+  add.setAttribute('aria-label', i18nT('New tab'));
   add.addEventListener('click', () => workspace.addTab());
   tabStrip.appendChild(add);
 
@@ -649,8 +728,8 @@ function beginRename(id) {
   const btn = tabBtn(id);
   if (!tab || !btn) return;
   const input = el('input', 'input wk-tab-edit');
-  input.value = tab.name;
-  input.setAttribute('aria-label', 'Tab name');
+  input.value = i18nT(tab.name);
+  input.setAttribute('aria-label', i18nT('Tab name'));
   input.maxLength = 40;
   let done = false;
   const finish = (commit) => {
@@ -815,21 +894,66 @@ function nudge(ev, id, mode) {
 
 /* ---- add-widget picker ---------------------------------------------------- */
 
+/* The picker is grouped by what a widget is for, and filtered by experience
+   level: a beginner sees the widgets that explain themselves, with the rest one
+   click away ("Show all widgets") rather than hidden — the level decides what is
+   offered first, never what is possible. A widget kind missing from these maps
+   is shown in "More" at every level (fail open). */
+const WIDGET_GROUP = {
+  cards: 'Watch', table: 'Watch', quote: 'Watch', tape: 'Watch', session: 'Watch', alerts: 'Watch',
+  chart: 'Charts & research', compare: 'Charts & research', fundamentals: 'Charts & research',
+  news: 'Charts & research', calendar: 'Charts & research',
+  screener: 'Discover', heatmap: 'Discover', movers: 'Discover',
+  portfolio: 'Portfolio', allocation: 'Portfolio', performance: 'Portfolio', income: 'Portfolio', calculator: 'Portfolio',
+  learn: 'Learn', glossary: 'Learn', notes: 'Learn',
+};
+const GROUP_ORDER = ['Watch', 'Charts & research', 'Discover', 'Portfolio', 'Learn', 'More'];
+const WIDGET_LEVEL = {
+  table: 'standard', compare: 'standard', calendar: 'standard', screener: 'standard',
+  performance: 'standard', income: 'standard', calculator: 'standard',
+};
+const LEVEL_RANK = { beginner: 0, standard: 1, pro: 2 };
+const LEVEL_TXT = { beginner: 'Beginner', standard: 'Standard', pro: 'Pro' };
+export function widgetLevel(kind) { return WIDGET_LEVEL[kind] || 'beginner'; }
+function levelOk(kind) { return LEVEL_RANK[levelNow()] >= LEVEL_RANK[widgetLevel(kind)]; }
+let pickerAll = false;
+
 function renderPicker() {
   picker.textContent = '';
-  const list = Array.isArray(WIDGETS) ? WIDGETS : [];
-  for (const entry of list) {
-    if (!entry || !entry.id) continue;
-    const row = el('button', 'wk-pick', null);
-    row.type = 'button';
-    row.setAttribute('role', 'menuitem');
-    row.appendChild(el('span', 'wk-pick-label', entry.label || entry.id));
-    if (entry.desc) row.appendChild(el('span', 'wk-pick-desc', entry.desc));
-    row.addEventListener('click', () => { closePicker(); workspace.addWidget(entry.id); });
-    row.addEventListener('keydown', onPickerKey);
-    picker.appendChild(row);
+  const list = (Array.isArray(WIDGETS) ? WIDGETS : []).filter((e) => e && e.id);
+  const hidden = pickerAll ? [] : list.filter((e) => !levelOk(e.id));
+  const shown = list.filter((e) => pickerAll || levelOk(e.id));
+  for (const g of GROUP_ORDER) {
+    const inGroup = shown.filter((e) => (WIDGET_GROUP[e.id] || 'More') === g);
+    if (!inGroup.length) continue;
+    const head = el('div', 'wk-pick-group', i18nT(g));
+    head.setAttribute('role', 'presentation');
+    picker.appendChild(head);
+    for (const entry of inGroup) {
+      const row = el('button', 'wk-pick', null);
+      row.type = 'button';
+      row.setAttribute('role', 'menuitem');
+      row.dataset.kind = entry.id;
+      const lab = el('span', 'wk-pick-label', i18nT(entry.label || entry.id));
+      if (!levelOk(entry.id)) lab.appendChild(el('span', 'lgi-lv lv-' + widgetLevel(entry.id), i18nT(LEVEL_TXT[widgetLevel(entry.id)])));
+      row.appendChild(lab);
+      if (entry.desc) row.appendChild(el('span', 'wk-pick-desc', i18nT(entry.desc)));
+      row.addEventListener('click', () => { closePicker(); workspace.addWidget(entry.id); });
+      row.addEventListener('keydown', onPickerKey);
+      picker.appendChild(row);
+    }
   }
-  if (!picker.childNodes.length) picker.appendChild(el('p', 'wk-pick-desc', 'No widgets are registered.'));
+  if (hidden.length) {
+    const more = el('button', 'wk-pick wk-pick-more', null);
+    more.type = 'button';
+    more.setAttribute('role', 'menuitem');
+    more.appendChild(el('span', 'wk-pick-label', i18nT('Show all widgets') + ' (+' + hidden.length + ')'));
+    more.appendChild(el('span', 'wk-pick-desc', i18nT('More advanced widgets, for when you want them. Your experience level only changes what is offered first.')));
+    more.addEventListener('click', () => { pickerAll = true; renderPicker(); const f = picker.querySelector('.wk-pick'); if (f) f.focus(); });
+    more.addEventListener('keydown', onPickerKey);
+    picker.appendChild(more);
+  }
+  if (!picker.childNodes.length) picker.appendChild(el('p', 'wk-pick-desc', i18nT('No widgets are registered.')));
 }
 
 function onPickerKey(ev) {
@@ -847,6 +971,7 @@ function onPickerKey(ev) {
 }
 
 function openPicker() {
+  pickerAll = false;
   renderPicker();
   picker.hidden = false;
   if (pickerBtn) pickerBtn.setAttribute('aria-expanded', 'true');
@@ -869,12 +994,13 @@ function buildShell() {
   const bar = el('div', 'wk-bar');
   tabStrip = el('div', 'wk-tabs');
   tabStrip.setAttribute('role', 'tablist');
-  tabStrip.setAttribute('aria-label', 'Workspace tabs');
+  tabStrip.setAttribute('aria-label', i18nT('Workspace tabs'));
   bar.appendChild(tabStrip);
   bar.appendChild(el('span', 'spacer'));
 
   const wrap = el('div', 'wk-picker-wrap');
-  pickerBtn = el('button', 'cs-btn wk-add', '＋ Widget');
+  pickerBtn = el('button', 'cs-btn wk-add', i18nT('Widget'));
+  pickerBtn.title = i18nT('Add a widget') + ' (n)';
   pickerBtn.type = 'button';
   pickerBtn.setAttribute('aria-haspopup', 'menu');
   pickerBtn.setAttribute('aria-expanded', 'false');
@@ -890,7 +1016,10 @@ function buildShell() {
   reset.type = 'button';
   reset.title = i18nT('Restore the default tabs and widgets');
   reset.addEventListener('click', () => {
-    if (safe(() => window.confirm(i18nT('Discard your tabs and widgets and restore the default workspace?')), true)) workspace.reset();
+    const lv = levelNow();
+    const msg = i18nT('Discard your tabs and widgets and restore the default workspace?') + '\n'
+      + i18nT('Layout') + ': ' + i18nT(LEVEL_TXT[lv]);
+    if (safe(() => window.confirm(msg), true)) workspace.reset(lv);
   });
   bar.appendChild(reset);
 
@@ -1036,7 +1165,7 @@ export const workspace = {
 
   addTab(name) {
     if (!model) return null;
-    const clean = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 40) : 'Tab ' + (model.tabs.length + 1);
+    const clean = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 40) : i18nT('Tab') + ' ' + (model.tabs.length + 1);
     const tab = { id: mintId('t'), name: clean, widgets: [] };
     model.tabs.push(tab);
     model.activeTab = tab.id;
@@ -1229,21 +1358,32 @@ export const workspace = {
 
   selection() { return selected; },
 
+  // Symbols the active tab's widgets are pinned to, so the host can fetch them:
+  // a pin outside the watchlist would otherwise never get a quote.
+  pinnedSymbols() {
+    const tab = activeTab();
+    if (!tab) return [];
+    const out = [];
+    for (const w of tab.widgets) if (!w.linked && w.symbol && meta(w.kind).needsSymbol && !out.includes(w.symbol)) out.push(w.symbol);
+    return out;
+  },
+
   async popOut(id) {
     const found = findWidget(id);
     if (!found) return { ok: false, reason: 'unknown-widget' };
     const w = found.widget;
     const mod = await loadDisplays();
     if (!mod || !mod.displays) return { ok: false, reason: 'displays-unavailable' };
-    const panel = PANEL_FOR_KIND[w.kind] || 'board';
+    const panel = panelForWidget(w.kind);
     // The symbol on screen, fallback included: a detached copy of a widget must
     // open on what the widget was showing, not on nothing.
     return mod.displays.open(panel, { widget: { kind: w.kind, symbol: symbolOf(w, ctx()) } });
   },
 
-  reset() {
+  // reset(level?) — restore a template: the current level's, or the one named.
+  reset(level) {
     if (!model) return;
-    const fresh = defaultWorkspace();
+    const fresh = defaultWorkspace(level);
     model.v = 1;
     model.tabs = fresh.tabs;
     model.activeTab = fresh.activeTab;
@@ -1256,6 +1396,9 @@ export const workspace = {
     persist(true);
     emit();
   },
+
+  // For the command palette and the "n" shortcut.
+  openPicker() { if (picker) { if (pickerWrap) pickerWrap.scrollIntoView({ block: 'nearest' }); openPicker(); } },
 
   onChange(cb) {
     if (typeof cb !== 'function') return () => {};

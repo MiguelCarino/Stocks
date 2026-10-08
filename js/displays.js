@@ -54,6 +54,9 @@ import { peers } from './peers.js';
 // which migrates) is already imported above.
 import { widgetMeta } from './widgets.js';
 
+// UI-string translation via the site dictionary (i18n.js); identity outside a page.
+const i18nT = (s) => (typeof window !== 'undefined' && window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+
 const CFG_KEY = 'stk_popouts';
 const POPOUT_PAGE = 'popout.html';
 const WIN_PREFIX = 'stkPanel_';
@@ -94,8 +97,10 @@ const KIND_FOR_PANEL = { board: 'cards', ticker: 'quote', portfolio: 'portfolio'
 // the workspace does not have to keep a second copy of this table in step.
 const PANEL_FOR_KIND = {
   cards: 'board', table: 'board', chart: 'board', alerts: 'board',
-  quote: 'ticker',
-  portfolio: 'portfolio', session: 'portfolio',
+  screener: 'board', heatmap: 'board', movers: 'board', compare: 'board',
+  news: 'board', calendar: 'board', learn: 'board', glossary: 'board', notes: 'board',
+  quote: 'ticker', fundamentals: 'ticker', calculator: 'ticker',
+  portfolio: 'portfolio', session: 'portfolio', allocation: 'portfolio', performance: 'portfolio', income: 'portfolio',
   tape: 'strip',
 };
 const FALLBACK_WIDGET = 'cards';
@@ -286,7 +291,7 @@ function describe(s, i, current) {
   return {
     id: screenId(i),
     index: i,
-    label: '#' + (i + 1) + ' · ' + w + '×' + h + (s.isPrimary ? ' · primary' : ''),
+    label: '#' + (i + 1) + ' · ' + w + '×' + h + (s.isPrimary ? ' · ' + i18nT('primary') : ''),
     left: s.left || 0, top: s.top || 0, width: w, height: h,
     availLeft: s.availLeft != null ? s.availLeft : (s.left || 0),
     availTop: s.availTop != null ? s.availTop : (s.top || 0),

@@ -1,0 +1,4 @@
+﻿date;type;symbol;qty;price;fee;amount;currency;note
+05/03/2024;compra;SAN.MC;100;3,85;2,50;;EUR;"Primera; compra"
+15/03/2024;venta;SAN.MC;40;4,10;2,50;;EUR;
+20/03/2024;dividendo;SAN.MC;;;;8,40;EUR;

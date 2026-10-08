@@ -1,0 +1,9 @@
+Account Number,Investment Name,Symbol,Shares,Share Price,Total Value,
+12345678,VANGUARD TOTAL STOCK,VTI,10,250.00,2500.00,
+
+Account Number,Trade Date,Settlement Date,Transaction Type,Transaction Description,Investment Type,Investment Name,Symbol,Shares,Share Price,Principal Amount,Commission Fees,Net Amount,Accrued Interest,Account Type,
+12345678,01/10/2024,01/12/2024,Buy,Buy,ETFs,VANGUARD TOTAL STOCK,VTI,10.0000,230.00,-2300.00,0.0,-2300.00,0.0,CASH,
+12345678,03/20/2024,03/22/2024,Dividend,Dividend Received,ETFs,VANGUARD TOTAL STOCK,VTI,0.0000,1.00,8.50,0.0,8.50,0.0,CASH,
+12345678,03/20/2024,03/22/2024,Sweep in,Sweep In,Money Market,VANGUARD FEDERAL,VMFXX,8.5,1.00,8.50,0.0,8.50,0.0,CASH,
+12345678,04/01/2024,04/03/2024,Sell,Sell,ETFs,VANGUARD TOTAL STOCK,VTI,-4.0000,240.00,960.00,0.0,960.00,0.0,CASH,
+12345678,04/02/2024,04/02/2024,Funds Received,Funds Received,Cash,CASH,,0.0,1.00,500.00,0.0,500.00,0.0,CASH,

@@ -27,8 +27,13 @@
 
 import { TABLE_WIDGET } from './widget-table.js';
 import { store } from './store.js';
-import { portfolioTotals } from './engine.js';
-import { sparkline, drawLineChart } from './viz.js';
+import { PORTFOLIO_WIDGETS } from './widgets-portfolio.js';
+import { describeRule, ALERT_TYPES } from './alerttypes.js';
+import { sparkline } from './viz.js';
+import { mountChartPanel } from './chartpanel.js';
+import { MARKET_WIDGETS } from './widgets-market.js';
+import { LEARN_WIDGETS } from './widgets-learn.js';
+import { helpIcon } from './learn.js';
 import { sessionAt, marketForSymbol, formatCountdown, MARKETS, HOLIDAY_HORIZON } from './session.js';
 import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtTime, fmtAge } from './format.js';
 
@@ -60,16 +65,12 @@ export const WIDGETS = [
     needsSymbol: false, minW: 3, minH: 3, defaultW: 8, defaultH: 5, create: createCards,
   },
   {
-    id: 'chart', label: 'Chart', desc: 'Line chart of one symbol.',
-    needsSymbol: true, minW: 3, minH: 3, defaultW: 6, defaultH: 4, create: createChart,
+    id: 'chart', label: 'Chart', desc: 'Candles, indicators, drawings and alert lines for one symbol.',
+    needsSymbol: true, minW: 3, minH: 4, defaultW: 6, defaultH: 6, create: createChart,
   },
   {
     id: 'quote', label: 'Quote', desc: 'One symbol, large enough to read across a room.',
     needsSymbol: true, minW: 2, minH: 2, defaultW: 3, defaultH: 3, create: createQuote,
-  },
-  {
-    id: 'portfolio', label: 'Portfolio', desc: 'Holdings, value and P/L.',
-    needsSymbol: false, minW: 4, minH: 3, defaultW: 6, defaultH: 4, create: createPortfolio,
   },
   {
     id: 'tape', label: 'Tape', desc: 'One-line ticker of the whole watchlist.',
@@ -83,6 +84,12 @@ export const WIDGETS = [
     id: 'session', label: 'Session', desc: 'Market state and the countdown to the next boundary.',
     needsSymbol: false, minW: 2, minH: 1, defaultW: 4, defaultH: 2, create: createSession,
   },
+  // Discovery and research: widgets-market.js.
+  ...MARKET_WIDGETS,
+  // Money: portfolio, allocation, performance, income, calculator.
+  ...PORTFOLIO_WIDGETS,
+  // Education and your own notes: widgets-learn.js.
+  ...LEARN_WIDGETS,
 ];
 
 export function widgetMeta(kind) {
@@ -99,13 +106,13 @@ export function createWidget(kind, host, ctx) {
   const box = host && host.appendChild ? host : document.createElement('div');
   const entry = widgetMeta(kind);
   if (!entry || typeof entry.create !== 'function') {
-    return placeholder(kind, box, 'Unknown widget', 'This layout asks for a widget this version does not have.');
+    return placeholder(kind, box, i18nT('Unknown widget'), i18nT('This layout asks for a widget this version does not have.'));
   }
 
   let inner = null;
-  try { inner = entry.create(box, ctx || {}); } catch (e) { inner = null; }
+  try { inner = entry.create(box, ctx || {}); } catch (e) { inner = null; report(kind, e); }
   if (!inner || typeof inner.update !== 'function') {
-    return placeholder(kind, box, entry.label + ' unavailable', 'This widget could not be built.');
+    return placeholder(kind, box, i18nT(entry.label) + ' · ' + i18nT('unavailable'), i18nT('This widget could not be built.'));
   }
 
   // A renderer that throws must not throw once per tick forever: it says so, in
@@ -113,8 +120,9 @@ export function createWidget(kind, host, ctx) {
   // leave a dead panel showing live-looking numbers. Its own clocks and listeners
   // go with it — a stopped widget must not keep repainting nodes nobody can see.
   let dead = false;
-  const die = () => {
+  const die = (e) => {
     dead = true;
+    report(kind, e);
     try { if (typeof inner.destroy === 'function') inner.destroy(); } catch (e) { /* already failing */ }
     failNote(box, entry.label);
   };
@@ -122,11 +130,11 @@ export function createWidget(kind, host, ctx) {
     kind,
     update(next) {
       if (dead) return;
-      try { inner.update(next); } catch (e) { die(); }
+      try { inner.update(next); } catch (e) { die(e); }
     },
     setSymbol(sym) {
       if (dead || typeof inner.setSymbol !== 'function') return;
-      try { inner.setSymbol(sym); } catch (e) { die(); }
+      try { inner.setSymbol(sym); } catch (e) { die(e); }
     },
     destroy() { try { if (typeof inner.destroy === 'function') inner.destroy(); } catch (e) { /* nothing left to save */ } },
   };
@@ -141,12 +149,18 @@ function placeholder(kind, box, title, note) {
   return { kind, update() {}, setSymbol() {}, destroy() { box.textContent = ''; } };
 }
 
+// The slot says what happened; the console says why, so a stopped widget is a
+// bug someone can actually file rather than a silent blank.
+function report(kind, e) {
+  try { console.error('[widget ' + kind + ']', e); } catch (x) { /* no console */ }
+}
+
 function failNote(box, label) {
   box.textContent = '';
   const wrap = el('div', 'wg-blank');
-  wrap.append(el('div', 'wg-blank-title', label + ' stopped'));
-  wrap.append(el('p', 'field-note', 'This widget hit an error while rendering and has been stopped, '
-    + 'so it cannot show you a stale frame as if it were live. Remove and re-add it to try again.'));
+  wrap.append(el('div', 'wg-blank-title', i18nT(label) + ' · ' + i18nT('stopped')));
+  wrap.append(el('p', 'field-note', i18nT('This widget hit an error while rendering and has been stopped, '
+    + 'so it cannot show you a stale frame as if it were live. Remove and re-add it to try again.')));
   box.appendChild(wrap);
 }
 
@@ -277,24 +291,51 @@ function symBtn(sym, cls) {
   const b = el('button', 'wg-pick ' + (cls || ''), sym);
   b.type = 'button';
   b.dataset.sym = sym || '';
-  if (sym) b.title = 'Link the workspace to ' + sym;
+  if (sym) b.title = i18nT('Link the workspace to') + ' ' + sym + ' · ' + i18nT('double-click for details');
   return b;
 }
 
 /* One delegated listener per widget instead of one per row. Rows are rebuilt on
-   watchlist changes and a per-row listener leaks with them. */
+   watchlist changes and a per-row listener leaks with them.
+   A single click LINKS the workspace to the symbol and nothing else; the details
+   drawer is an explicit request — double-click, or Enter on a focused symbol —
+   because a drawer that opened on every click covered the board the user was
+   trying to re-link. Space still clicks, so the keyboard keeps both actions. */
 function wirePicks(root, getCtx) {
-  const onClick = (e) => {
+  const pick = (e) => {
     const t = e.target && e.target.closest ? e.target.closest('[data-sym]') : null;
     // An empty data-sym is a widget that has no subject yet, not a symbol named ''.
-    if (!t || !root.contains(t) || !t.dataset.sym) return;
-    const ctx = getCtx();
-    const fn = ctx && ctx.onSelect;
-    if (typeof fn !== 'function') return;
-    try { fn(t.dataset.sym); } catch (e2) { /* the workspace's problem, not this render's */ }
+    return t && root.contains(t) && t.dataset.sym ? t.dataset.sym : null;
   };
+  const call = (name, sym, e) => {
+    const ctx = getCtx();
+    const fn = ctx && ctx[name];
+    if (typeof fn !== 'function') return false;
+    if (e && name === 'openDetails') e.preventDefault();
+    try { fn(sym); } catch (e2) { /* the workspace's problem, not this render's */ }
+    return true;
+  };
+  const onClick = (e) => { const s = pick(e); if (s) call('onSelect', s); };
+  const onDbl = (e) => { const s = pick(e); if (s) call('openDetails', s, e); };
+  const onKey = (e) => { if (e.key !== 'Enter' || e.repeat) return; const s = pick(e); if (s) call('openDetails', s, e); };
   root.addEventListener('click', onClick);
-  return () => root.removeEventListener('click', onClick);
+  root.addEventListener('dblclick', onDbl);
+  root.addEventListener('keydown', onKey);
+  return () => { root.removeEventListener('click', onClick); root.removeEventListener('dblclick', onDbl); root.removeEventListener('keydown', onKey); };
+}
+
+// The explicit "open details" control a needsSymbol widget carries in its head.
+function detailsBtn(getCtx, getSym) {
+  const b = el('button', 'icon-mini wg-details info-i', 'i');
+  b.type = 'button';
+  b.title = i18nT('Details — quote, fundamentals, events and news');
+  b.setAttribute('aria-label', i18nT('Open details'));
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const sym = getSym(); const ctx = getCtx();
+    if (sym && ctx && typeof ctx.openDetails === 'function') { try { ctx.openDetails(sym); } catch (e2) { /* host */ } }
+  });
+  return b;
 }
 
 /* A countdown that only advances when a quote arrives is not a countdown, and an
@@ -343,33 +384,33 @@ function tagParts(ctx, sym) {
 
   if (q) {
     if (q.baseline === 'rolling_24h' || q.baseline === 'prev_close') {
-      parts.push(['basis', q.baseline === 'rolling_24h' ? 'vs 24h' : 'vs prev close',
-        q.baselineNote || 'Baseline reported by the data provider.']);
+      parts.push(['basis', i18nT(q.baseline === 'rolling_24h' ? 'vs 24h' : 'vs prev close'),
+        i18nT(q.baselineNote || 'Baseline reported by the data provider.')]);
     } else if (mkt === 'CRYPTO') {
       // Marked 'approx' rather than plain: this baseline was guessed from the
       // ticker, and a guess that looks identical to a figure the provider vouched
       // for is the guess doing damage.
-      parts.push(['basis approx', 'vs 24h',
-        q.baselineNote || 'Baseline inferred from asset class — the provider did not state one.']);
+      parts.push(['basis approx', i18nT('vs 24h'),
+        i18nT(q.baselineNote || 'Baseline inferred from asset class — the provider did not state one.')]);
     } else {
-      parts.push(['basis unstated', 'no baseline',
-        q.baselineNote || 'The provider did not say what this change is measured against.']);
+      parts.push(['basis unstated', i18nT('no baseline'),
+        i18nT(q.baselineNote || 'The provider did not say what this change is measured against.')]);
     }
   }
 
   if (!q && isUncovered(ctx, sym)) {
-    parts.push(['uncovered', 'Not covered',
-      'The provider handling this symbol returned no quote for it. Try another provider in Settings, '
-      + 'or check the symbol.']);
+    parts.push(['uncovered', i18nT('Not covered'),
+      i18nT('The provider handling this symbol returned no quote for it. Try another provider in Settings, '
+      + 'or check the symbol.')]);
   }
 
-  if (mkt === 'CRYPTO') parts.push(['always', '24/7', 'Crypto trades continuously; it is never closed.']);
+  if (mkt === 'CRYPTO') parts.push(['always', '24/7', i18nT('Crypto trades continuously; it is never closed.')]);
   else if (sess.state !== 'open') parts.push(['closed', sess.label, [sess.detail, sess.nextLabel].filter(Boolean).join(' · ')]);
 
   const stale = staleMsOf(ctx, sym);
   if (stale) {
-    parts.push(['stale', 'Stale ' + fmtAge(stale),
-      'This quote’s own timestamp has not advanced while the market is tradeable.']);
+    parts.push(['stale', i18nT('Stale') + ' ' + fmtAge(stale),
+      i18nT('This quote’s own timestamp has not advanced while the market is tradeable.')]);
   }
   return parts;
 }
@@ -404,10 +445,10 @@ function sectionHead(text) { return el('div', 'wg-sec rail-lbl', text); }
 // there is no subject: the widget still occupies its slot, and a control that
 // vanishes is harder to find again than one that is visibly inert.
 function paintSubject(btn, sym) {
-  setText(btn, sym || 'No symbol');
+  setText(btn, sym || i18nT('No symbol'));
   setAttr(btn, 'data-sym', sym || '');
   setAttr(btn, 'disabled', sym ? null : '');
-  setAttr(btn, 'title', sym ? 'Link the workspace to ' + sym : 'Pin a symbol to this widget, or link it to the workspace.');
+  setAttr(btn, 'title', sym ? i18nT('Link the workspace to') + ' ' + sym : i18nT('Pin a symbol to this widget, or link it to the workspace.'));
 }
 
 /* Blur lives on a class rather than an inline filter so the widget matches the
@@ -425,7 +466,13 @@ function createCards(host, ctx) {
   let cur = ctx || {};
   const grid = el('div', 'card-grid');
   const empty = el('p', 'empty-cell', i18nT('No symbols yet. Add one from the watchlist.'));
-  host.append(grid, empty);
+  // Beginners get a one-line key to the card, each part with its explanation.
+  const legend = el('div', 'card-legend');
+  const part = (txt, id) => { const s = el('span', 'card-legend-i', i18nT(txt)); s.append(helpIcon(id)); return s; };
+  legend.append(el('span', 'rail-lbl', i18nT('How to read a card')),
+    part('Latest price', 'last-price'), part('Change since previous close', 'prev-close'),
+    part('Today’s low–high range', 'day-range'), part('Data may be delayed', 'delayed-data'));
+  host.append(legend, grid, empty);
 
   const cards = new Map();     // sym -> refs, so a repaint is a text write
   const unwire = wirePicks(host, () => cur);
@@ -439,6 +486,7 @@ function createCards(host, ctx) {
     applyPrivacy(host, cur);
     const list = symbolsOf(cur);
     const live = new Set(list);
+    setHidden(legend, !(cur.level === 'beginner' && list.length > 0));
     setHidden(empty, list.length > 0);
     setHidden(grid, list.length === 0);
 
@@ -517,7 +565,7 @@ function paintCard(ref, sym, ctx) {
 
   paintRange(ref, q);
   setText(ref.src, q ? q.source : DASH);
-  setText(ref.ts, q ? 'as of ' + fmtTime(q.ts) : '');
+  setText(ref.ts, q ? i18nT('as of') + ' ' + fmtTime(q.ts) : '');
 }
 
 // A high equal to the low is not a range, and a price outside its own reported
@@ -538,6 +586,10 @@ function paintRange(ref, q) {
 
 /* ---- chart ---------------------------------------------------------------- */
 
+/* The chart tile is a header (symbol, last, change, caveats) over a chart panel
+   (chartpanel.js), which owns the toolbar, the engine and the data requests made
+   through ctx.candles. Its range, interval, type and indicators are this
+   widget's saved state, so two charts of one symbol can show different things. */
 function createChart(host, ctx) {
   let cur = ctx || {};
   let pinned = null;
@@ -549,23 +601,23 @@ function createChart(host, ctx) {
   const delta = el('span', 'delta flat', DASH);
   const frame = el('span', 'wg-frame field-note', '');
   frame.hidden = true;
-  head.append(symEl, last, delta, frame);
-
   const tags = el('div', 'card-tags');
+  const info = detailsBtn(() => cur, () => subjectOf(cur, pinned));
+  head.append(symEl, last, delta, tags, frame, el('span', 'spacer'), info);
 
-  const wrap = el('div', 'chart-wrap');
-  // `amount` because the y-axis labels and the curve itself are prices: privacy
-  // mode blurring the headline above a canvas that states the same number to two
-  // decimals is the feature defeating itself. drawLineChart cannot be told to
-  // omit the levels, so the whole canvas joins the blurred set.
-  const canvas = el('canvas', 'detail-chart amount');
-  wrap.appendChild(canvas);
-
-  const note = el('p', 'field-note', '');
-  root.append(head, tags, wrap, note);
+  const body = el('div', 'wg-chart-body amount-chart');
+  root.append(head, body);
   host.appendChild(root);
 
   const unwire = wirePicks(head, () => cur);
+  const panel = mountChartPanel(body, {
+    getDeps: () => ({ ...cur, quoteFor: (s) => quoteOf(cur, s) }),
+    state: cur.widgetState,
+    defaults: cur.settings && cur.settings.chartDefaults,
+    onState: (next) => { const fn = cur.onWidgetState; if (typeof fn === 'function') safe(() => fn(next), null); },
+    readOnly: typeof cur.saveDrawings !== 'function',
+    variant: 'widget',
+  });
   // Baseline, session and staleness for the symbol on screen — a chart with no
   // caveat line was the one widget that could show an hours-dead feed as a trend.
   const stopClock = everySecond(() => {
@@ -574,49 +626,19 @@ function createChart(host, ctx) {
     paintFrameAge(frame, cur);
   });
 
-  // A canvas is sized in device pixels, so a resized panel is a redraw and not a
-  // reflow. rAF collapses a drag into one draw per frame.
-  let pending = 0;
-  const redraw = () => {
-    pending = 0;
-    const pts = seriesOf(cur, subjectOf(cur, pinned));
-    drawLineChart(canvas, pts);
-  };
-  const queue = () => {
-    if (pending) return;
-    pending = safe(() => requestAnimationFrame(redraw), 0);
-    if (!pending) redraw();
-  };
-  let ro = null;
-  if (typeof ResizeObserver === 'function') {
-    ro = safe(() => { const o = new ResizeObserver(queue); o.observe(wrap); return o; }, null);
-  }
-
   function update(next) {
     if (next) cur = next;
     applyPrivacy(host, cur);
     const sym = subjectOf(cur, pinned);
     paintSubject(symEl, sym);
-
+    setHidden(info, !sym || typeof cur.openDetails !== 'function');
     const q = sym ? quoteOf(cur, sym) : null;
-    setText(last, q ? fmtPrice(q.price, q.currency, priceOpts(cur, sym)) : DASH);
+    setText(last, q ? fmtPrice(q.price, q.currency, priceOpts(cur, sym)) : (sym && isUncovered(cur, sym) ? i18nT('Not covered') : DASH));
     fillDelta(delta, q, { signed: true });
     paintTags(tags, sym ? tagParts(cur, sym) : []);
     paintFrameAge(frame, cur);
-
-    const pts = sym ? seriesOf(cur, sym) : [];
-    // An axis drawn around one point looks like a flat market rather than an
-    // absent series, so drawLineChart is left to say "No series data" and this
-    // says why. Two points is the minimum that is actually a line.
-    setText(note, !sym ? 'Link this chart to a symbol, or pin one to it.'
-      : pts.length < 2 ? (isUncovered(cur, sym) ? sym + ' is not covered by the provider handling it, so there is no series to draw.'
-        : 'No series for ' + sym + ' yet — it fills in once the app has fetched candles.')
-        : sym + ' · ' + pts.length + ' points · delayed, not advice.');
-
-    // The canvas is the one thing here with no text, focus or selection to lose,
-    // and it also cannot observe a theme switch, so it is simply redrawn every
-    // tick. rAF collapses that into at most one draw per frame.
-    queue();
+    panel.setSymbol(sym);
+    panel.tick();
   }
 
   update(cur);
@@ -626,9 +648,8 @@ function createChart(host, ctx) {
     setSymbol(sym) { pinned = typeof sym === 'string' && sym ? sym : null; update(); },
     destroy() {
       stopClock();
-      if (pending) safe(() => cancelAnimationFrame(pending), null);
-      if (ro) safe(() => ro.disconnect(), null);
       unwire();
+      safe(() => panel.destroy(), null);
       host.textContent = '';
     },
   };
@@ -656,7 +677,9 @@ function createQuote(host, ctx) {
   const frame = el('span', 'wg-quote-frame', '');
   frame.hidden = true;
   foot.append(src, vol, age, frame);
-  root.append(symEl, name, price, delta, tags, foot);
+  const info = detailsBtn(() => cur, () => subjectOf(cur, pinned));
+  info.classList.add('wg-quote-details');
+  root.append(symEl, name, price, delta, tags, foot, info);
   host.appendChild(root);
 
   const unwire = wirePicks(root, () => cur);
@@ -670,6 +693,7 @@ function createQuote(host, ctx) {
     applyPrivacy(host, cur);
     const sym = subjectOf(cur, pinned);
     paintSubject(symEl, sym);
+    setHidden(info, !sym || typeof cur.openDetails !== 'function');
     setText(name, sym ? profileName(cur, sym) : '');
 
     const q = sym ? quoteOf(cur, sym) : null;
@@ -677,7 +701,7 @@ function createQuote(host, ctx) {
     else if (!q && isUncovered(cur, sym)) {
       // The one case where a dash would be a lie: the provider answered, and the
       // answer was that it does not have this symbol.
-      setText(price, 'Not covered');
+      setText(price, i18nT('Not covered'));
       setCls(delta, 'delta flat');
       setText(delta, DASH);
     } else {
@@ -689,8 +713,8 @@ function createQuote(host, ctx) {
     setText(src, q ? q.source : '');
     // Volume is the one extra field worth the space on a glance panel: it is what
     // says whether the price above it was set by a market or by one small print.
-    setText(vol, q && q.volume != null ? 'Vol ' + fmtVolume(q.volume) : '');
-    setText(age, q ? 'as of ' + fmtTime(q.ts) : '');
+    setText(vol, q && q.volume != null ? i18nT('Vol') + ' ' + fmtVolume(q.volume) : '');
+    setText(age, q ? i18nT('as of') + ' ' + fmtTime(q.ts) : '');
     paintFrameAge(frame, cur);
   }
 
@@ -704,240 +728,9 @@ function createQuote(host, ctx) {
 }
 
 /* ---- portfolio ------------------------------------------------------------ */
-
-const PORT_COLS = [
-  ['Symbol', false], ['Shares', true], ['Avg', true], ['Last', true],
-  ['Value', true], ['Day P/L', true], ['Total P/L', true], ['Weight', true],
-];
-
-// This widget cannot add a holding, so its empty state has to name the control
-// that can. There is no portfolio view to send anyone to — holdings live in the
-// Holdings dialog in the header.
-const EMPTY_HOLDINGS = 'No holdings yet. Add one from the Holdings button in the header.';
-
-function createPortfolio(host, ctx) {
-  let cur = ctx || {};
-
-  const root = el('div', 'wg-port');
-  const stats = el('div', 'stat-row');
-  const tiles = {
-    value: tile('Total value'), day: tile('Day P/L'), total: tile('Total P/L'), cost: tile('Cost basis'),
-  };
-  stats.append(tiles.value.root, tiles.day.root, tiles.total.root, tiles.cost.root);
-
-  const curNote = el('p', 'field-note wg-cur-note', '');
-  curNote.hidden = true;
-
-  /* A valuation is the one figure in this app a reader is most likely to act on,
-     so it has to say how old the prices under it are. Two separate statements:
-     the frame's age covers "nothing has refreshed", the stale line covers "one of
-     these symbols stopped printing while its market was open". */
-  const frame = el('p', 'field-note wg-port-frame', '');
-  frame.hidden = true;
-  const staleNote = el('p', 'field-note wg-port-stale', '');
-  staleNote.hidden = true;
-
-  const wrap = el('div', 'table-wrap');
-  const table = el('table', 'data');
-  const thead = el('thead');
-  const hrow = el('tr');
-  for (const [label, num] of PORT_COLS) {
-    const th = el('th', num ? 'num' : '', label);
-    th.scope = 'col';
-    hrow.appendChild(th);
-  }
-  thead.appendChild(hrow);
-  const tbody = el('tbody');
-  table.append(thead, tbody);
-  wrap.appendChild(table);
-
-  const emptyRow = el('tr');
-  const emptyCell = el('td', 'empty-cell', i18nT(EMPTY_HOLDINGS));
-  emptyCell.colSpan = PORT_COLS.length;
-  emptyRow.appendChild(emptyCell);
-
-  root.append(stats, curNote, frame, staleNote, wrap);
-  host.appendChild(root);
-
-  const rows = new Map();      // holding id -> refs
-  const unwire = wirePicks(root, () => cur);
-  // Ages are clocks. Repainting only the staleness marks keeps the valuation
-  // itself on the poll cadence, where it belongs.
-  const stopClock = everySecond(() => paintStaleness());
-
-  function paintStaleness() {
-    paintFrameAge(frame, cur);
-    let n = 0;
-    for (const ref of rows.values()) {
-      const ms = ref.sym ? staleMsOf(cur, ref.sym) : 0;
-      if (ms) n++;
-      setHidden(ref.stale, !ms);
-      if (ms) {
-        setText(ref.stale, 'Stale ' + fmtAge(ms));
-        setAttr(ref.stale, 'title', 'This quote’s own timestamp has not advanced while the market is tradeable, '
-          + 'so this row — and the totals above — are built from an old price.');
-      }
-    }
-    setHidden(staleNote, n === 0);
-    if (n) {
-      setText(staleNote, n === 1
-        ? 'One of these prices has stopped advancing while its market is tradeable, so the totals above include it as it stands.'
-        : n + ' of these prices have stopped advancing while their markets are tradeable, so the totals above include them as they stand.');
-    }
-  }
-
-  function update(next) {
-    if (next) cur = next;
-    applyPrivacy(host, cur);
-    const holdings = Array.isArray(cur.holdings) ? cur.holdings : [];
-    const quotes = (cur.quotes && typeof cur.quotes === 'object') ? cur.quotes : {};
-    const totals = safe(() => portfolioTotals(holdings, quotes), null);
-    if (!totals) {
-      // Better an empty table than one filled with numbers whose arithmetic
-      // failed halfway.
-      setText(emptyCell, i18nT('This portfolio could not be valued.'));
-      showEmpty();
-      return;
-    }
-
-    const unit = portfolioCurrency(cur, holdings);
-    /* Two decimals, not fmtPrice: a total is an amount of money, and fmtPrice
-       takes its precision from the magnitude of the number, which is right for a
-       per-unit price and wrong here — a $24.01 day P/L is not '+$24.0110'. */
-    const prefix = unit === false ? '' : (!unit || unit === 'USD' ? '$' : unit + ' ');
-    const money = (v) => {
-      const n = Number(v);
-      if (v == null || !Number.isFinite(n)) return DASH;
-      return (n < 0 ? '−' : '') + prefix + fmtNum(Math.abs(n), 2);
-    };
-    const signedMoney = (v) => (v == null ? DASH : (v >= 0 ? '+' : '−') + money(Math.abs(v)));
-
-    setHidden(curNote, unit !== false);
-    if (unit === false) {
-      setText(curNote, 'Your holdings are quoted in more than one currency. These totals are a plain sum with no '
-        + 'conversion applied, so they are shown without a currency symbol.');
-    }
-
-    setTile(tiles.value, money(totals.value), null, null);
-    setTile(tiles.day, signedMoney(totals.dayPL), totals.dayPL, null);
-    setTile(tiles.total, signedMoney(totals.totalPL), totals.totalPL, totals.totalPLPct);
-    setTile(tiles.cost, money(totals.cost), null, null);
-
-    const list = totals.rows;
-    if (!list.length) { setText(emptyCell, i18nT(EMPTY_HOLDINGS)); showEmpty(); return; }
-    if (emptyRow.parentNode) emptyRow.remove();
-
-    const keys = list.map((r, i) => rowKey(r, i));
-    const live = new Set(keys);
-    for (const [key, ref] of rows) if (!live.has(key)) { ref.root.remove(); rows.delete(key); }
-
-    list.forEach((r, i) => {
-      const key = keys[i];
-      let ref = rows.get(key);
-      if (!ref) { ref = buildPortRow(); rows.set(key, ref); }
-      if (tbody.children[i] !== ref.root) tbody.insertBefore(ref.root, tbody.children[i] || null);
-      paintPortRow(ref, r, cur, money, signedMoney);
-    });
-    paintStaleness();
-  }
-
-  function showEmpty() {
-    for (const [key, ref] of rows) { ref.root.remove(); rows.delete(key); }
-    if (!emptyRow.parentNode) tbody.appendChild(emptyRow);
-    paintStaleness();
-  }
-
-  update(cur);
-  return {
-    kind: 'portfolio',
-    update,
-    setSymbol() { /* the portfolio is every holding, not one of them */ },
-    destroy() { stopClock(); unwire(); rows.clear(); host.textContent = ''; },
-  };
-}
-
-// Holdings written before ids existed would otherwise all collide on `undefined`.
-function rowKey(r, i) {
-  const h = r.holding || {};
-  return String(h.id || (h.symbol || '?') + '#' + i);
-}
-
-function tile(label) {
-  const root = el('div', 'stat-tile');
-  const value = el('div', 'st-value amount', DASH);
-  const chip = el('span', 'delta flat', '');
-  chip.hidden = true;
-  root.append(el('div', 'st-label', label), value, chip);
-  return { root, value, chip };
-}
-
-function setTile(t, text, dir, pct) {
-  setText(t.value, text);
-  if (dir == null) { setHidden(t.chip, true); return; }
-  setHidden(t.chip, false);
-  setCls(t.chip, 'delta ' + (dir >= 0 ? 'up' : 'down'));
-  setText(t.chip, (dir >= 0 ? '▲' : '▼') + (pct != null ? ' ' + fmtNum(pct) + '%' : ''));
-}
-
-function buildPortRow() {
-  const root = el('tr');
-  const symCell = el('td', 'sym');
-  const symEl = symBtn('', 'wg-pick-sym');
-  const stale = el('span', 'tag stale', '');
-  stale.hidden = true;
-  symCell.append(symEl, stale);
-  root.appendChild(symCell);
-  const cells = [];
-  for (let i = 1; i < PORT_COLS.length; i++) {
-    const td = el('td', 'num amount', DASH);
-    cells.push(td);
-    root.appendChild(td);
-  }
-  return { root, symEl, stale, cells, sym: '' };
-}
-
-function paintPortRow(ref, r, ctx, money, signedMoney) {
-  const sym = (r.holding && r.holding.symbol) || '';
-  ref.sym = sym;
-  setText(ref.symEl, sym);
-  setAttr(ref.symEl, 'data-sym', sym || null);
-  setAttr(ref.symEl, 'title', sym ? 'Link the workspace to ' + sym : null);
-
-  const q = sym ? quoteOf(ctx, sym) : null;
-  const uncov = sym && r.price == null && isUncovered(ctx, sym);
-  const [shares, avg, lastCell, value, day, total, weight] = ref.cells;
-  setText(shares, fmtNum(r.shares));
-  // Per-unit prices, at the price's own precision and with the price's currency
-  // rule — the same two calls app.js's holdings table makes, so the two views of
-  // one holding cannot disagree about what it cost.
-  setText(avg, fmtMove(r.avg, r.price));
-  setText(lastCell, uncov ? 'Not covered'
-    : r.price != null ? fmtPrice(r.price, q && q.currency, priceOpts(ctx, sym)) : DASH);
-  setAttr(lastCell, 'title', uncov ? 'The provider handling this symbol returned no quote for it.' : null);
-  setText(value, money(r.marketValue));
-  setText(day, signedMoney(r.dayPL));
-  setCls(day, 'num amount' + (r.dayPL == null ? '' : r.dayPL >= 0 ? ' pos' : ' neg'));
-  setText(total, signedMoney(r.totalPL));
-  setCls(total, 'num amount' + (r.totalPL == null ? '' : r.totalPL >= 0 ? ' pos' : ' neg'));
-  // An unpriced holding has an unknown weight, not a zero one: portfolioTotals
-  // divides by the priced total, so 0.0% here would be a share of a sum this row
-  // is not in.
-  setText(weight, r.weight != null && r.marketValue != null ? r.weight.toFixed(1) + '%' : DASH);
-}
-
-/* Totals here are a plain sum with no FX conversion in them, so they may only
-   carry a currency symbol when every holding is quoted in the same one. Mixed
-   holdings get bare numbers and a line saying why, which is the honest shape of a
-   figure that adds dollars to yen. */
-function portfolioCurrency(ctx, holdings) {
-  const set = new Set();
-  for (const h of holdings) {
-    const q = quoteOf(ctx, h && h.symbol);
-    if (q && q.currency) set.add(q.currency);
-  }
-  if (set.size > 1) return false;
-  return set.size === 1 ? [...set][0] : null;
-}
+/* The portfolio, allocation, performance, income and calculator widgets live in
+   widgets-portfolio.js: they are built on the transaction ledger (portfolio.js)
+   rather than the old flat holdings, and share one valuation (folio.js). */
 
 /* ---- tape ----------------------------------------------------------------- */
 
@@ -1046,7 +839,7 @@ function createAlerts(host, ctx) {
     const armed = all.filter((r) => r && r.armed);
     setHidden(rulesEmpty, armed.length > 0);
 
-    const sig = armed.map((r) => [r.id, r.symbol, r.type, r.op, r.value, scopeOf(r)].join('~')).join('|');
+    const sig = armed.map((r) => [r.id, r.symbol, r.type, r.op, r.value, JSON.stringify(r.params || {}), scopeOf(r)].join('~')).join('|');
     if (sig !== ruleSig) {
       ruleSig = sig;
       rulesBox.textContent = '';
@@ -1087,12 +880,19 @@ function scopeOf(rule) {
 
 function ruleRow(r) {
   const row = el('div', 'rule-row');
-  row.appendChild(symBtn(r.symbol, 'rr-sym'));
-  row.appendChild(el('span', 'rule-cond',
-    (r.type === 'pct' ? 'Δ%' : 'price') + ' ' + (r.op === 'above' ? '≥' : '≤') + ' ' + r.value + (r.type === 'pct' ? '%' : '')));
+  // A portfolio rule has no ticker to link to.
+  if (r.symbol && r.symbol[0] !== '@') row.appendChild(symBtn(r.symbol, 'rr-sym'));
+  else row.appendChild(el('span', 'rr-sym', i18nT('Portfolio')));
+  let text = '';
+  try { text = describeRule(r); } catch (e) { text = r.symbol + ' ' + r.type; }
+  const cond = el('span', 'rule-cond', text);
+  // The number the rule last measured, so a glance says how close it is.
+  const def = ALERT_TYPES[r.type];
+  if (def && typeof r._prev === 'number' && Number.isFinite(r._prev)) cond.title = i18nT('Last measured') + ': ' + r._prev.toPrecision(6);
+  row.appendChild(cond);
   const scope = scopeOf(r);
-  const chip = el('span', 'tag scope ' + scope, SCOPE_LABEL[scope]);
-  chip.title = SCOPE_TIP[scope];
+  const chip = el('span', 'tag scope ' + scope, i18nT(SCOPE_LABEL[scope]));
+  chip.title = i18nT(SCOPE_TIP[scope]);
   row.appendChild(chip);
   return row;
 }
@@ -1176,12 +976,12 @@ function createSession(host, ctx) {
 
 function buildSessRow(id) {
   const root = el('div', 'wg-sess-row');
-  const mkt = el('span', 'wg-sess-mkt', (MARKETS[id] && MARKETS[id].label) || id);
+  const mkt = el('span', 'wg-sess-mkt', i18nT((MARKETS[id] && MARKETS[id].label) || id));
   const state = el('span', 'tag closed', '');
   const count = el('span', 'wg-sess-count amount', '');
   const nextEl = el('span', 'wg-sess-next', '');
   const detail = el('span', 'wg-sess-detail', '');
-  const approx = el('span', 'tag approx', 'approx');
+  const approx = el('span', 'tag approx', i18nT('approx'));
   approx.hidden = true;
   approx.title = 'The holiday table is authoritative through ' + HOLIDAY_HORIZON
     + '; this date is rule-derived and unconfirmed, so treat the boundary as an estimate.';
@@ -1200,5 +1000,5 @@ function paintSessRow(ref, id, now) {
   setText(ref.next, s.nextLabel || '');
   setText(ref.detail, s.detail || '');
   setHidden(ref.approx, !s.approx);
-  setAttr(ref.root, 'title', (MARKETS[id] && MARKETS[id].label ? MARKETS[id].label + ' · ' : '') + s.tz);
+  setAttr(ref.root, 'title', (MARKETS[id] && MARKETS[id].label ? i18nT(MARKETS[id].label) + ' · ' : '') + s.tz);
 }

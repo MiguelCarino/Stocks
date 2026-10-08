@@ -28,6 +28,9 @@
 
 import { peers } from './peers.js';
 import { store } from './store.js';
+
+// UI-string translation via the site dictionary (i18n.js); identity when absent.
+const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
 import { sessionAt, marketForSymbol } from './session.js';
 // The storage readers, and only because the host is the one that writes that
 // storage: a second, hand-rolled reader of the same key is how a panel ends up
@@ -39,6 +42,10 @@ import { sessionAt, marketForSymbol } from './session.js';
 import { panelConfig, panelWidget, screenGeometry, PANELS } from './displays.js';
 import { createWidget, widgetMeta } from './widgets.js';
 import { fmtAge } from './format.js';
+// Read-only market data for charts and research widgets. Every call made from
+// this window passes cacheOnly, so a panel shows what the main window already
+// fetched (or the local demo generator) and never spends an API credit.
+import { market } from './providers/index.js';
 
 // The mapping the displays contract fixes. The key is what the URL and every
 // stored config say; the value is what actually draws.
@@ -67,9 +74,17 @@ const SHARED = {
   alertlog: 'stk_alertlog',
   watchlist: 'stk_watchlist',
   holdings: 'stk_holdings',
+  drawings: 'stk_drawings',
+  // The portfolio widgets value the ledger here, from the same quotes, rather
+  // than receive a valuation: a frame stays a frame of quotes.
+  ledger: 'stk_ledger',
+  targets: 'stk_targets',
+  settings: 'stk_settings',
 };
+// Provider caches the host writes; a change only means "re-read on next use".
+const PROVIDER_CACHES = ['stk_candles', 'stk_meta'];
 
-const shared = { series: {}, profiles: {}, rules: [], alertlog: [], watchlist: null, holdings: null };
+const shared = { series: {}, profiles: {}, rules: [], alertlog: [], watchlist: null, holdings: null, drawings: {}, ledger: [], targets: {}, settings: {} };
 
 const el = {};
 const state = {
@@ -147,6 +162,7 @@ function boot() {
   // Fired by the host's own writes, in this document, for free. Not load-bearing:
   // the same re-read happens on every frame that arrives.
   window.addEventListener('storage', (e) => {
+    if (e && PROVIDER_CACHES.includes(e.key)) { try { market.reloadCaches(); } catch (err) { /* older facade */ } return; }
     if (e && e.key && !Object.values(SHARED).includes(e.key)) return;
     refreshShared();
     render();
@@ -225,10 +241,10 @@ function paintWidgetNote() {
 // pinned to one, because 'Board' over a single chart would be a lie.
 function panelTitle() {
   const meta = widgetMeta(state.widgetKind);
-  let label = (meta && meta.label) || 'Panel';
+  let label = i18nT((meta && meta.label) || 'Panel');
   if (PANEL_WIDGET[state.panelKind] === state.widgetKind) {
     const p = PANELS.find((x) => x && x.id === state.panelKind);
-    if (p && p.label) label = p.label;
+    if (p && p.label) label = i18nT(p.label);
   }
   return state.symbol ? label + ' · ' + state.symbol : label;
 }
@@ -378,7 +394,7 @@ function lsRead(key) {
 function refreshShared() {
   for (const [name, key] of Object.entries(SHARED)) {
     const v = lsRead(key);
-    if (name === 'series' || name === 'profiles') {
+    if (name === 'series' || name === 'profiles' || name === 'drawings' || name === 'targets' || name === 'settings') {
       shared[name] = v && typeof v === 'object' && !Array.isArray(v) ? v : {};
     } else if (name === 'watchlist' || name === 'holdings') {
       // null is meaningful: not seeded, as opposed to seeded and empty.
@@ -541,8 +557,8 @@ function tickChrome() {
     // they are still not current — but do not cry feed failure over a choice.
     el.poStale.hidden = false;
     el.poStale.className = 'chip ' + (fs.paused ? 'warn' : 'bad');
-    el.poStale.textContent = fs.age == null ? 'No feed'
-      : (fs.paused ? 'Paused ' : 'Stale ') + fmtAge(fs.age);
+    el.poStale.textContent = fs.age == null ? i18nT('No feed')
+      : i18nT(fs.paused ? 'Paused' : 'Stale') + ' ' + fmtAge(fs.age);
   }
 
   paintSession(now);
@@ -559,10 +575,10 @@ function paintSession(now) {
   const bits = [s.label];
   if (s.detail) bits.push(s.detail);
   if (shut && s.nextLabel) bits.push(s.nextLabel);
-  if (s.approx) bits.push('approx');
+  if (s.approx) bits.push(i18nT('approx'));
   el.poSession.textContent = bits.join(' · ');
   el.poSession.className = ('chip ' + (s.isOpen ? 'ok' : s.isTradeable ? 'warn' : '')).trim();
-  el.poSession.title = shut ? 'Market is shut — these are the last prices seen, not live ones.' : '';
+  el.poSession.title = shut ? i18nT('Market is shut — these are the last prices seen, not live ones.') : '';
 }
 
 // The panel's market is whatever its subject trades on, and for a panel showing
@@ -650,7 +666,16 @@ function buildCtx() {
     // The leader's effective cadence, not this window's stored setting: it is
     // what every staleness threshold downstream is sized from, and a panel that
     // used the nominal 15s would cry stale through a 300s closed-market poll.
-    settings: { interval: intervalSec(), privacy: state.privacy },
+    // Base currency and cost method come from the host's saved settings, so a
+    // panel values the ledger exactly as the main window does. Read-only here.
+    settings: {
+      interval: intervalSec(), privacy: state.privacy,
+      baseCurrency: (shared.settings && shared.settings.baseCurrency) || 'USD',
+      costMethod: (shared.settings && shared.settings.costMethod) || 'fifo',
+      level: (shared.settings && shared.settings.level) || (store.settings && store.settings.level) || 'standard',
+    },
+    ledger: Array.isArray(shared.ledger) ? shared.ledger : [],
+    targets: shared.targets || {},
     selection: state.selection,
     seriesFor(sym) {
       const rec = shared.series && shared.series[sym];
@@ -674,6 +699,27 @@ function buildCtx() {
     staleMs: fs.stale && fs.age != null ? fs.age : 0,
     privacy: state.privacy,
     onSelect,
+    level: (store.settings && store.settings.level) || 'standard',
+    isDemoMode: () => { try { return market.isDemoMode(); } catch (e) { return true; } },
+    candles: (sym, o) => market.candles(sym, { ...(o || {}), cacheOnly: true }),
+    dailyBars: (sym) => market.candles(sym, { range: '1Y', interval: '1d', cacheOnly: true }),
+    fundamentals: (sym) => market.fundamentals(sym, { cacheOnly: true }),
+    news: (sym, o) => market.news(sym, { ...(o || {}), cacheOnly: true }),
+    events: (sym) => market.events(sym, { cacheOnly: true }),
+    calendar: (o) => market.calendar({ ...(o || {}), cacheOnly: true }),
+    universes: () => fetch('data/universes.json').then((r) => r.json()).then((d) => (d && Array.isArray(d.lists) ? d.lists : [])).catch(() => []),
+    // Drawings are shown, never edited, here: no saveDrawings, so the chart
+    // panel mounts read-only.
+    drawingsFor: (sym) => { const d = shared.drawings && shared.drawings[sym]; return Array.isArray(d) ? d : []; },
+    levelsFor: (sym) => {
+      const out = [];
+      for (const r of shared.rules || []) {
+        if (r && r.armed && r.symbol === sym && r.type === 'price' && Number.isFinite(Number(r.value))) out.push({ price: Number(r.value), label: (r.op === 'below' || r.op === 'crossBelow' ? '≤' : '≥'), kind: 'alert' });
+      }
+      const q = quotes[sym];
+      if (q && Number.isFinite(q.prevClose)) out.push({ price: q.prevClose, label: 'Prev close', kind: 'prevClose' });
+      return out;
+    },
   };
 }
 
@@ -768,11 +814,11 @@ function closeSelf() {
   try { window.close(); } catch (e) { /* noop */ }
   setTimeout(() => {
     if (window.closed) return;
-    el.poHint.textContent = 'Esc blocked — close from the window controls';
+    el.poHint.textContent = i18nT('Esc blocked — close from the window controls');
     // The strip layout has no room for the hint line and hides it, so the
     // sentence borrows the chip slot rather than going nowhere.
     if (el.poHint.offsetParent === null) {
-      el.poPlace.textContent = 'Esc blocked — use the window controls';
+      el.poPlace.textContent = i18nT('Esc blocked — use the window controls');
       el.poPlace.hidden = false;
     }
   }, 900);

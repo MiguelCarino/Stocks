@@ -1,0 +1,6 @@
+Action,Time,ISIN,Ticker,Name,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),Withholding tax,Currency (Withholding tax),Currency conversion fee,Currency (Currency conversion fee),Notes,ID
+Deposit,2024-01-02 09:00:00,,,,,,,,,,1000.00,GBP,,,,,,dep1
+Market buy,2024-01-16 15:30:00,US0378331005,AAPL,Apple,2.5,185.00,USD,1.25,,GBP,371.00,GBP,,,1.00,GBP,,EOF1
+Dividend (Dividend),2024-02-15 10:00:00,US0378331005,AAPL,Apple,2.5,0.24,USD,1.26,,,0.40,GBP,0.09,USD,,,,
+Market sell,2024-03-01 15:30:00,US0378331005,AAPL,Apple,1,180.00,USD,1.27,-4.20,GBP,141.73,GBP,,,0.5,GBP,,EOF2
+Interest on cash,2024-03-31 00:00:00,,,,,,,,,,0.85,GBP,,,,,,

@@ -1,0 +1,4 @@
+"txid","ordertxid","pair","time","type","ordertype","price","cost","fee","vol","margin","misc","ledgers"
+"TXID1","OID1","XXBTZUSD","2024-01-16 15:30:00.1234","buy","limit","42000.0","420.0","1.09","0.01","0.0","",""
+"TXID2","OID2","ETHUSD","2024-03-01 10:00:00","sell","market","3400.0","340.0","0.88","0.1","0.0","",""
+"TXID3","OID3","SOL/EUR","2024-03-02 10:00:00","buy","market","100.0","100.0","0.26","1","0.0","",""

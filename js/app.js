@@ -25,8 +25,17 @@ import { store, normalizeSymbol } from './store.js';
 // budget comes from the facade rather than base.js so the UI never reaches past
 // the provider boundary it is supposed to be insulated from.
 import { market, budget } from './providers/index.js';
-import { drawLineChart } from './viz.js';
-import { createScheduler, evaluateAlerts, portfolioTotals, pollSeconds } from './engine.js';
+import { mountChartPanel } from './chartpanel.js';
+import { renderFundamentals, renderEvents, renderNewsList } from './widgets-market.js';
+import { computePortfolio, fxPairsNeeded, positionsCSV } from './folio.js';
+import { initLedgerUI } from './ledger-ui.js';
+import { initAlertsUI, scopeOf } from './alerts-ui.js';
+import { ALERT_TYPES } from './alerttypes.js';
+import { helpIcon, configure as learnConfigure, openLessons, openGlossary, startTour, levelPicker, loadGlossary,
+  LEVELS, LEVEL_ORDER, normalizeLevel, levelAllows } from './learn.js';
+import { initPalette } from './palette.js';
+import { WIDGETS } from './widgets.js';
+import { createScheduler, evaluateAlerts, pollSeconds } from './engine.js';
 import { sessionAt, marketForSymbol, formatCountdown, HOLIDAY_HORIZON, MARKETS } from './session.js';
 import { peers } from './peers.js';
 import { displays, PANELS } from './displays.js';
@@ -34,11 +43,14 @@ import { workspace } from './workspace.js';
 // One copy of every number format, shared with the widgets and the popout. The
 // old local copies inferred FX from app state; these take { fx } from the caller,
 // which is why they can be shared at all.
-import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime, fmtCap } from './format.js';
+import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime } from './format.js';
 
 const $ = (id) => document.getElementById(id);
 // UI-string translation via the site dictionary (i18n.js); identity when absent.
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+// A translated template: i18nF('Imported {n} symbols.', {n: 3}). The braces stay
+// in the key, so a translation can put the number wherever its grammar wants it.
+const i18nF = (s, vars) => i18nT(s).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const safe = (fn, fallback = null) => { try { return fn(); } catch (e) { return fallback; } };
 
@@ -62,22 +74,21 @@ const EXT_HOURS = {
 // scale a bar against (or, for demo, no network calls at all).
 const RATE_CEILING = { finnhub: 60, twelvedata: 8, polygon: 5, alpaca: 200, alphavantage: 5, coingecko: 30, demo: null };
 
-// Rule session scope <-> the rule's `sessions` array. An empty array means every
-// session, which is also what a rule written before scoping existed implies.
-const SESSION_SCOPES = { regular: ['open'], extended: ['pre', 'open', 'post'], any: [] };
-const SCOPE_LABEL = { regular: 'Regular hours', extended: 'Extended hours', any: 'Any session' };
-
 const state = {
   quotes: {}, selection: null, lastUpdated: 0, fetchError: null,
   // Symbols a fetch asked for and did not get back. Empty until the first tick,
   // never null, because a widget reads it on every frame.
   uncovered: new Set(),
   freshness: {},        // symbol -> { ts, changedAt, polls }: staleness is derived, never asserted
+  misses: {},           // symbol -> consecutive successful polls that did not return it
+  daily: {},            // symbol -> { at, bars, isDemo }: daily bars for levels, pivots and scans
+  fund: {},             // symbol -> { at, f }: fundamentals already fetched this session
   logFilter: '',
   screens: [],
 };
 let scheduler = null;
 let clockTimer = null;
+let alertsUI = null, ledgerUI = null;
 
 /* ---- boot ----------------------------------------------------------------- */
 function boot() {
@@ -89,11 +100,14 @@ function boot() {
   $('pageDisclaimer').textContent = i18nT(DISCLAIMER);
   $('railDisclaimer').textContent = i18nT('Data stays in your browser. Not investment advice.');
   $('ackText').textContent = i18nT(DISCLAIMER);
-  $('sessApprox').textContent = 'Holiday table ends ' + HOLIDAY_HORIZON + ' — later dates are rule-derived, not confirmed';
+  $('sessApprox').textContent = i18nF('Holiday table ends {date} — later dates are rule-derived, not confirmed', { date: HOLIDAY_HORIZON });
 
   applySettingsToUI();
   wireControls();
   wireModals();
+  wireLearn();
+  wireLevel();
+  wirePalette();
   wireDrawer();
   wireHashBanner();
   wireDisplays();
@@ -108,6 +122,8 @@ function boot() {
   reportStorage();
 
   if (!store.settings.ack) $('ackGate').hidden = false;
+  else noticeLevel();
+  noticeMigration();
 
   startClock();
   startEngine();
@@ -152,7 +168,7 @@ function checkLeadership() {
     leaderless = !(q.held || []).some((l) => l.name === 'stk-leader');
     if (leaderless && !leaderlessTold) {
       leaderlessTold = true;
-      toast('No window holds the shared refresh lock — this tab is refreshing on its own.', 'err');
+      toast(i18nT('No window holds the shared refresh lock — this tab is refreshing on its own.'), 'err');
       updateModeChip();
     }
   }).catch(() => {});
@@ -261,7 +277,7 @@ function publishState() {
     watchlist: store.watchlist.slice(),
     holdings: store.holdings.slice(),
     interval: store.settings.interval,
-    settings: { privacy: !!store.settings.privacy },
+    settings: { privacy: !!store.settings.privacy, baseCurrency: store.settings.baseCurrency, costMethod: store.settings.costMethod, level: store.settings.level },
   });
 }
 
@@ -269,13 +285,27 @@ function publishState() {
 
 // Everything one tick fetches, in one place, because the cadence is decided from
 // the same set: a batch is only as closed as its most-open market.
-function watchedSymbols() {
-  const portSyms = store.holdings.map((h) => h.symbol);
+function watchedSymbols({ forCadence = false } = {}) {
+  // Open positions, not every symbol the ledger ever mentioned: a position sold
+  // years ago does not need a quote on every poll.
+  const pf = folio();
+  const portSyms = pf ? pf.positions.map((p) => p.symbol) : [];
   // Armed rules on symbols that are in neither list would otherwise never be
-  // evaluated: the rule would sit there looking live and never fire.
-  const ruleSyms = store.rules.filter((r) => r.armed).map((r) => r.symbol);
-  const idx = store.settings.showMarket ? ['SPY', 'QQQ', 'DIA'] : [];
-  return [...new Set([...store.watchlist, ...portSyms, ...ruleSyms, ...idx])].filter(Boolean);
+  // evaluated: the rule would sit there looking live and never fire. The
+  // portfolio pseudo-symbol is not a ticker and is never fetched.
+  const ruleSyms = store.rules.filter((r) => r.armed).map((r) => r.symbol).filter((x) => x && x[0] !== '@');
+  const idx = store.settings.showMarket ? stripSymbols() : [];
+  // A widget pinned to a symbol outside the watchlist used to show a dash
+  // forever: nothing ever asked for its quote. So does the open drawer.
+  const pinned = safe(() => workspace.pinnedSymbols(), []) || [];
+  const extra = [state.selection, drawerSym].filter(Boolean);
+  // The FX legs the base-currency totals need. They are valuation inputs, not
+  // things the user is watching, so they do not get to set the poll cadence: an
+  // equity-only portfolio in pesos must not be polled all night because USDMXN
+  // trades around the clock.
+  const fx = forCadence ? [] : safe(() => fxPairsNeeded(store.ledger, state.quotes, store.settings.baseCurrency), []) || [];
+  return [...new Set([...store.watchlist, ...portSyms, ...ruleSyms, ...idx, ...pinned, ...extra, ...fx])]
+    .filter((x) => typeof x === 'string' && x);
 }
 
 async function tick() {
@@ -293,7 +323,14 @@ async function tick() {
     if (state.fetchError) { state.fetchError = null; updateModeChip(); }
   } catch (e) {
     if (e && e.rateLimited) throw e;   // let the scheduler back off on HTTP 429
-    state.fetchError = 'Quote fetch failed — check your API key or connection.';
+    // Say which failure it was: a rejected key and a dropped connection need
+    // different fixes, and "check your key or connection" sends people to both.
+    const kind = e && (e.kind || (e.authError ? 'authError' : e.network ? 'network' : e.timeout ? 'timeout' : e.premium ? 'premium' : null));
+    state.fetchError = i18nT(kind === 'authError' ? 'Your data provider rejected the API key. Check it in Settings.'
+      : kind === 'network' ? 'The data provider could not be reached. Check your connection.'
+        : kind === 'timeout' ? 'The data provider did not answer in time.'
+          : kind === 'premium' ? 'That data needs a paid plan with your provider.'
+            : 'Quote fetch failed — check your API key or connection.');
     updateModeChip();
     // Repaint on the way out. state.lastUpdated is untouched, so this is the tick
     // that starts the frame visibly ageing; returning without it left the board
@@ -304,19 +341,48 @@ async function tick() {
   noteFreshness(quotes);
   // A symbol the fetch asked for and did not get back is not "loading" — the
   // routed provider does not cover it. Without this the card sits on an em dash
-  // forever and reads as a stuck feed rather than an answer.
-  state.uncovered = new Set(all.filter((s) => !quotes[s] && !state.quotes[s]));
+  // forever and reads as a stuck feed rather than an answer. A symbol that WAS
+  // covered and stops coming back is uncovered too, but only after two misses in
+  // a row: one gap in a batch is an outage, two is an answer.
+  for (const s of all) state.misses[s] = quotes[s] ? 0 : (state.misses[s] || 0) + 1;
+  state.uncovered = new Set(all.filter((s) => !quotes[s] && (!state.quotes[s] || state.misses[s] >= 2)));
   state.quotes = { ...state.quotes, ...quotes };
   state.lastUpdated = Date.now();
 
   // sparkline series: the facade's TTL decides cache vs refetch (conserves budget).
   await Promise.all(syms.map((s) => market.series(s).catch(() => {})));
+  prefetchProfiles(syms);
 
-  evaluateAlerts(state.quotes, fireAlert, { sessionFor });
+  // Technical and range rules read cached daily bars and fundamentals; both are
+  // answered synchronously from what is already here, and fetched in the
+  // background (paced) for the armed rules that need them.
+  ensureRuleData();
+  evaluateAlerts(state.quotes, fireAlert, {
+    sessionFor,
+    barsFor: dailyFor,
+    fundamentalsFor: (s) => (state.fund[s] ? state.fund[s].f : null),
+    portfolio: safe(() => { const pf = folio(); return pf && !pf.empty ? pf.totals : null; }),
+  });
+  alertsUI && alertsUI.refreshPreview();
 
   publishFrame();
   renderAll();
   renderQuota();
+}
+
+/* Names and sectors for the board (cards, heatmap grouping). A profile is cached
+   for a week, so this is a handful of calls once, not a cost per tick — and it
+   is capped at three per tick so a fresh watchlist does not burst the budget. */
+const profileTried = new Set();
+function prefetchProfiles(syms) {
+  let n = 0;
+  for (const s of syms) {
+    if (n >= 3) break;
+    if (store.profiles[s] || profileTried.has(s)) continue;
+    profileTried.add(s);
+    n++;
+    market.profile(s).then((p) => { if (p) refreshWidgets(); }).catch(() => {});
+  }
 }
 
 // One frame, one repaint. workspace.update() hands the new ctx to each visible
@@ -327,7 +393,7 @@ function renderAll() {
   refreshWidgets();
   renderMarketStrip();
   renderSession();
-  if (!$('holdingsModal').hidden) renderHoldings();
+  refreshDrawer();
 }
 
 function refreshWidgets() { safe(() => workspace.update()); }
@@ -370,7 +436,7 @@ function sessionFor(symbol) {
 
 function watchedMarkets() {
   const set = new Set();
-  for (const sym of watchedSymbols()) set.add(safe(() => marketForSymbol(sym, state.quotes[sym]), 'US_EQUITY') || 'US_EQUITY');
+  for (const sym of watchedSymbols({ forCadence: true })) set.add(safe(() => marketForSymbol(sym, state.quotes[sym]), 'US_EQUITY') || 'US_EQUITY');
   return set;
 }
 
@@ -438,13 +504,13 @@ function renderSession() {
   chip.classList.toggle('conflict', conflict);
   $('sessChipTxt').textContent = s.label + (count ? ' · ' + count : '') + (s.approx ? ' ≈' : '');
   chip.title = [
-    ((MARKETS[mkt] && MARKETS[mkt].label) || mkt) + ' · ' + s.tz,
+    i18nT((MARKETS[mkt] && MARKETS[mkt].label) || mkt) + ' · ' + s.tz,
     s.nextLabel || '',
     s.detail || '',
-    s.approx ? 'The holiday table is authoritative through ' + HOLIDAY_HORIZON + '; this date is rule-derived and unconfirmed.' : '',
+    s.approx ? i18nF('Holiday table ends {date} — later dates are rule-derived, not confirmed', { date: HOLIDAY_HORIZON }) : '',
     conflict ? rep.disagreement : '',
-    rep && rep.agrees === true ? 'Your provider agreed at ' + fmtTime(rep.checkedAt || now) + '.' : '',
-    'Click to re-check with your provider.',
+    rep && rep.agrees === true ? i18nT('Your provider agreed at') + ' ' + fmtTime(rep.checkedAt || now) + '.' : '',
+    i18nT('Click to re-check with your provider.'),
   ].filter(Boolean).join('\n');
 
   $('sessNext').textContent = s.nextLabel || '';
@@ -499,8 +565,8 @@ function mountWorkspace() {
     // A workspace that failed to build must say so rather than leave a blank
     // panel that looks like an empty watchlist.
     host.appendChild(el('p', 'field-note warn-note',
-      'The widget workspace failed to load, so this area is empty. Your watchlist, holdings and alert rules are '
-      + 'untouched — reload the page, and use Export in Settings if it happens again.'));
+      i18nT('The widget workspace failed to load, so this area is empty. Your watchlist, holdings and alert rules are '
+      + 'untouched — reload the page, and use Export in Settings if it happens again.')));
   }
   syncViewButtons();
 }
@@ -525,7 +591,209 @@ function getCtx() {
     staleMs: frameStaleMs(),
     privacy: !!store.settings.privacy,
     onSelect: selectSymbol,
+    // Explicit "show me everything about this symbol" — double-click, Enter, ⓘ.
+    openDetails: openDrawer,
+    level: store.settings.level || 'standard',
+    // Education hooks: the learn widget's level switch and tour button. Absent in
+    // a popout, which is how those controls know to hide there.
+    setLevel: (lv) => setLevel(lv),
+    startTour: () => startAppTour(),
+    isDemoMode: () => safe(() => market.isDemoMode(), true),
+    // Market data, always through the provider facade (cached, paced, budgeted).
+    candles: (sym, o) => market.candles(sym, o || {}),
+    dailyBars,
+    dailyFor,
+    fundamentals: fundamentalsFor,
+    news: (sym, o) => market.news(sym, o || {}),
+    events: (sym) => market.events(sym),
+    calendar: (o) => market.calendar(o || {}),
+    universes: loadUniverses,
+    scanForecast,
+    // Chart annotations and levels. Writes go through the store here, never from
+    // a widget directly.
+    drawingsFor: (sym) => safe(() => store.drawingsFor(sym), []) || [],
+    saveDrawings: saveDrawings,
+    levelsFor,
+    onRequestAlert: (sym, price, op) => openAlerts(sym, { type: 'price', value: price, op }),
+    onLevelDrag,
+    // Portfolio: the ledger, one shared valuation, and the few writes the money
+    // widgets may ask for. Every write goes through the store here.
+    ledger: store.ledger,
+    portfolio: (account) => folio(account),
+    targets: store.targets,
+    setTarget: (key, pct) => { safe(() => store.setTarget(key, pct)); refreshWidgets(); },
+    setBaseCurrency,
+    setCostMethod,
+    openLedger: (o) => ledgerUI && ledgerUI.open({ ...(o || {}), fromWidget: true }),
+    downloadCSV: (name, text) => downloadFile(name + '-' + new Date().toISOString().slice(0, 10) + '.csv', 'text/csv', text),
   };
+}
+
+/* ---- portfolio ---------------------------------------------------------------
+   One valuation of the ledger per change in its inputs (folio.js memoises it),
+   shared by the widgets, the chart's cost lines, the alert engine and the
+   watched-symbol set. */
+function folio(account = '') {
+  return safe(() => computePortfolio({
+    ledger: store.ledger, quotes: state.quotes, baseCurrency: store.settings.baseCurrency,
+    method: store.settings.costMethod, profileFor, account: account || '',
+  }), null);
+}
+
+function setBaseCurrency(ccy) {
+  const c = String(ccy || '').toUpperCase().trim();
+  if (!/^[A-Z]{3}$/.test(c) || c === store.settings.baseCurrency) return;
+  store.settings.baseCurrency = c;
+  store.saveSettings();
+  publishState();
+  refreshWidgets();
+  // The new base may need FX legs nobody has fetched yet.
+  if (scheduler) scheduler.now();
+}
+
+function setCostMethod(m) {
+  if (!['fifo', 'avg'].includes(m) || m === store.settings.costMethod) return;
+  store.settings.costMethod = m;
+  store.saveSettings();
+  publishState();
+  refreshWidgets();
+}
+
+/* Armed rules that measure daily bars (RSI, moving averages, 52-week range)
+   need those bars cached; rules that can fall back on fundamentals need those.
+   Only the armed ones, at background priority, and each symbol at most once per
+   cache lifetime — this is the whole cost of technical alerts. */
+function ensureRuleData() {
+  for (const r of store.rules) {
+    if (!r || !r.armed || !r.symbol || r.symbol[0] === '@') continue;
+    const def = ALERT_TYPES[r.type];
+    if (!def) continue;
+    if (def.needs === 'bars') {
+      const d = state.daily[r.symbol];
+      if (!d || Date.now() - d.at > DAILY_TTL) dailyBars(r.symbol).catch(() => {});
+    }
+    if (def.fundamentals) ensureFund(r.symbol);
+  }
+}
+
+function noticeMigration() {
+  const mig = (store.ledger || []).filter((t) => t && t.date === '1970-01-01' && /^migrated/.test(t.note || '')).length;
+  if (!mig || store.settings.ledgerMigrationNoticed) return;
+  store.settings.ledgerMigrationNoticed = true;
+  safe(() => store.saveSettings());
+  setTimeout(() => toast(i18nT('Imported') + ' ' + mig + ' ' + i18nT(mig === 1 ? 'holding' : 'holdings') + ' '
+    + i18nT('from the old format into Transactions. Add their purchase dates there for accurate returns.')), 1200);
+}
+
+/* ---- market data for widgets ------------------------------------------------
+   Daily bars back the screener, pivots and the 52-week lines. They are fetched at
+   background priority (a visible chart always goes first in the pacer queue) and
+   remembered for the session so a second widget asking is free. */
+const DAILY_TTL = 15 * 60 * 1000;
+const dailyInflight = new Map();
+function dailyBars(sym) {
+  const hit = state.daily[sym];
+  if (hit && Date.now() - hit.at < DAILY_TTL && hit.bars.length) return Promise.resolve(hit.res);
+  // One request per symbol at a time: the screener, a chart and an armed RSI
+  // rule asking together must cost one call, not three.
+  if (dailyInflight.has(sym)) return dailyInflight.get(sym);
+  const p = market.candles(sym, { range: '1Y', interval: '1d', priority: 0, maxWait: 180000 }).then((res) => {
+    state.daily[sym] = { at: Date.now(), bars: (res && res.bars) || [], isDemo: !!(res && res.isDemo), res };
+    return res;
+  }).finally(() => dailyInflight.delete(sym));
+  dailyInflight.set(sym, p);
+  return p;
+}
+function dailyFor(sym) { const d = state.daily[sym]; return d && d.bars.length ? d.bars : null; }
+
+const FUND_TTL = 6 * 3600 * 1000;
+function fundamentalsFor(sym) {
+  return market.fundamentals(sym).then((f) => { state.fund[sym] = { at: Date.now(), f: f || null }; return f; });
+}
+// Background fetch for the 52-week lines, at most once per symbol per TTL.
+const fundAsked = new Map();
+function ensureFund(sym) {
+  const t = fundAsked.get(sym) || 0;
+  if (Date.now() - t < FUND_TTL) return;
+  fundAsked.set(sym, Date.now());
+  fundamentalsFor(sym).then(() => refreshWidgets()).catch(() => {});
+}
+
+let universesP = null;
+function loadUniverses() {
+  if (!universesP) {
+    universesP = fetch('data/universes.json', { cache: 'no-cache' }).then((r) => r.json())
+      .then((d) => (Array.isArray(d && d.lists) ? d.lists : []))
+      .catch(() => { universesP = null; return []; });
+  }
+  return universesP;
+}
+
+// "About N requests and how long" for a scan, from the pacer's own queue model.
+function scanForecast(syms) {
+  if (safe(() => market.isDemoMode(), true)) return { demo: true, ms: 0 };
+  const list = Array.isArray(syms) ? syms : [];
+  if (!list.length) return null;
+  const pid = safe(() => market.routeCandles(list[0], '1d', '1Y'), null);
+  if (!pid) return null;
+  const ms = safe(() => market.forecast(pid, list.length), null);
+  return { ms: Number.isFinite(ms) || ms === Infinity ? ms : 0, provider: pid, label: (PROVIDER_LABELS[pid] || pid) + ' ' + i18nT('free tier') };
+}
+
+function saveDrawings(sym, arr) {
+  const ok = safe(() => store.setDrawings(sym, arr), false);
+  if (ok === false && store.hashActive) toast(i18nT('Drawings are not saved while you are viewing a shared link.'), 'err');
+  return ok;
+}
+
+/* The horizontal lines a chart draws for a symbol: armed price rules (draggable,
+   so moving the line moves the rule), the average cost of a position, the
+   previous close and the 52-week range. Each says what it is in its label. */
+function levelsFor(sym) {
+  const out = [];
+  for (const r of store.rules) {
+    if (!r || !r.armed || r.symbol !== sym || r.type !== 'price' || !Number.isFinite(Number(r.value))) continue;
+    const arrow = r.op === 'below' || r.op === 'crossBelow' ? '≤' : '≥';
+    out.push({ price: Number(r.value), label: i18nT('Alert') + ' ' + arrow, kind: 'alert', draggable: true, ruleId: r.id });
+  }
+  const pos = positionFor(sym);
+  if (pos && Number.isFinite(pos.avgCost) && pos.avgCost > 0) out.push({ price: pos.avgCost, label: i18nT('Avg cost'), kind: 'cost' });
+  const q = state.quotes[sym];
+  if (q && Number.isFinite(q.prevClose)) out.push({ price: q.prevClose, label: i18nT('Prev close'), kind: 'prevClose' });
+  const f = state.fund[sym] && state.fund[sym].f;
+  let hi = f && Number.isFinite(f.high52) ? f.high52 : null, lo = f && Number.isFinite(f.low52) ? f.low52 : null;
+  if (hi == null || lo == null) {
+    const d = dailyFor(sym);
+    if (d && d.length > 150) {
+      for (const b of d.slice(-252)) { if (hi == null || b.h > hi) hi = b.h; if (lo == null || b.l < lo) lo = b.l; }
+    }
+  }
+  if (Number.isFinite(hi)) out.push({ price: hi, label: i18nT('52w high'), kind: 'high52' });
+  if (Number.isFinite(lo)) out.push({ price: lo, label: i18nT('52w low'), kind: 'low52' });
+  if (!state.fund[sym]) ensureFund(sym);
+  return out;
+}
+
+// Average cost across accounts, from the ledger (the legacy holdings were
+// migrated into it at schema v3).
+function positionFor(sym) {
+  const pf = folio();
+  let qty = 0, cost = 0;
+  for (const p of (pf && pf.positions) || []) {
+    if (p.symbol !== sym || !Number.isFinite(p.avgCost)) continue;
+    qty += p.qty; cost += p.avgCost * p.qty;
+  }
+  return qty ? { qty, cost, avgCost: cost / qty } : null;
+}
+
+// Dragging an alert line on a chart moves the rule it stands for.
+function onLevelDrag(sym, level, price) {
+  if (!level || level.kind !== 'alert' || !level.ruleId || !Number.isFinite(price)) return;
+  const value = Number(price.toPrecision(8));
+  safe(() => store.updateRule(level.ruleId, { value }));
+  toast(i18nT('Alert moved') + ': ' + sym + ' ' + fmtMove(value, value));
+  refreshWidgets();
+  if (!$('alertsModal').hidden) safe(() => renderRuleList());
 }
 
 function seriesFor(sym) {
@@ -547,11 +815,14 @@ function frameStaleMs() {
 
 /* Every path that changes which symbol the app is talking about goes through
    here: a widget's onSelect, a rail click, a card click inside the cards widget.
-   The drawer opens because that is what clicking a symbol has always done, and
-   the workspace selection moves so that linked widgets follow. */
+   Selecting only moves the workspace selection so linked widgets follow. The
+   details drawer used to open on every click as well, which covered the board
+   the user was re-linking; it now opens only on an explicit request
+   (double-click, Enter, the ⓘ buttons) through openDrawer. */
 function selectSymbol(sym) {
   const clean = normalizeSymbol(sym);
   if (!clean) return;
+  const fresh = !state.quotes[clean];
   state.selection = clean;
   safe(() => workspace.select(clean));
   // Repaint now rather than at the next poll: with a shut market the cadence
@@ -559,7 +830,10 @@ function selectSymbol(sym) {
   // which symbol is selected reads as broken.
   refreshWidgets();
   markRailSelection();
-  openDrawer(clean);
+  closeRailOnMobile();
+  // A symbol nobody has fetched yet (picked from a screener list) gets its quote
+  // now rather than at the next scheduled poll.
+  if (fresh && scheduler) scheduler.now();
 }
 
 function onWorkspaceChange(info) {
@@ -591,8 +865,8 @@ function gotoView(view) {
     return;
   }
   const added = safe(() => workspace.addWidget(kinds[0]));
-  if (added) toast('Added a ' + (view === 'port' ? 'Portfolio' : 'Cards') + ' widget to this tab.');
-  else toast('Could not add that widget — use ＋ Widget above the grid.', 'err');
+  if (added) toast(i18nT(view === 'port' ? 'Added a Portfolio widget to this tab.' : 'Added a Cards widget to this tab.'));
+  else toast(i18nT('Could not add that widget — use ＋ Widget above the grid.'), 'err');
   syncViewButtons();
 }
 
@@ -634,16 +908,25 @@ function renderRail() {
 
     const pick = el('button', 'rr-btn');
     pick.type = 'button';
-    pick.title = 'Show ' + sym;
+    pick.title = i18nT('Link the workspace to') + ' ' + sym + ' · ' + i18nT('double-click or Enter for details');
     pick.append(el('span', 'rr-sym', sym));
     pick.append(el('span', 'rr-price amount', q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : '—'));
     pick.appendChild(deltaChip(q));
     pick.addEventListener('click', () => selectSymbol(sym));
+    pick.addEventListener('dblclick', () => openDrawer(sym));
+    pick.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); selectSymbol(sym); openDrawer(sym); } });
     row.appendChild(pick);
+
+    const info = el('button', 'icon-mini rr-info info-i', 'i');
+    info.type = 'button';
+    info.title = i18nT('Details for') + ' ' + sym;
+    info.setAttribute('aria-label', i18nT('Details for') + ' ' + sym);
+    info.addEventListener('click', () => { selectSymbol(sym); openDrawer(sym); });
+    row.appendChild(info);
 
     const rm = el('button', 'icon-mini rr-x', '✕');
     rm.type = 'button';
-    rm.title = 'Remove ' + sym + ' from the watchlist';
+    rm.title = i18nF('Remove {sym} from the watchlist', { sym });
     rm.setAttribute('aria-label', 'Remove ' + sym);
     rm.addEventListener('click', () => { store.removeSymbol(sym); refreshAll(); });
     row.appendChild(rm);
@@ -656,190 +939,248 @@ function renderRail() {
   if (empty) empty.hidden = syms.length > 0;
 }
 
-/* ---- market strip --------------------------------------------------------- */
+/* ---- market strip -----------------------------------------------------------
+   A configurable list (Settings → Market strip symbols). The defaults are ETFs
+   that track the big US indices plus Bitcoin; an index itself (^GSPC, ^VIX) is
+   not something the free tiers quote, so the label says which fund stands in. */
+const DEFAULT_STRIP = ['SPY', 'QQQ', 'DIA', 'BTC', 'EURUSD'];
+const STRIP_LABELS = {
+  SPY: 'S&P 500 (SPY)', QQQ: 'Nasdaq 100 (QQQ)', DIA: 'Dow 30 (DIA)', IWM: 'Russell 2000 (IWM)',
+  BTC: 'Bitcoin', ETH: 'Ether', EWW: 'Mexico (EWW)', EWZ: 'Brazil (EWZ)', VIXY: 'VIX futures (VIXY)',
+  GLD: 'Gold (GLD)', TLT: '20y Treasuries (TLT)', EURUSD: 'EUR/USD', USDMXN: 'USD/MXN',
+};
+function stripSymbols() {
+  const raw = store.settings.stripSymbols;
+  const list = Array.isArray(raw) ? raw.map((x) => normalizeSymbol(x)).filter(Boolean) : DEFAULT_STRIP;
+  return [...new Set(list)].slice(0, 10);
+}
 function renderMarketStrip() {
   const strip = $('marketStrip');
   strip.hidden = !store.settings.showMarket;
   if (!store.settings.showMarket) return;
   const tiles = $('mktTiles');
   tiles.textContent = '';
-  for (const [sym, label] of [['SPY', 'S&P 500'], ['QQQ', 'Nasdaq 100'], ['DIA', 'Dow 30']]) {
+  for (const sym of stripSymbols()) {
     const q = state.quotes[sym];
-    const tile = el('div', 'stat-tile');
-    tile.append(el('div', 'st-label', label));
-    // No { fx }: these three are US equity ETFs, so the dollar prefix is right.
-    tile.append(el('div', 'st-value amount', q ? fmtPrice(q.price, q.currency) : '—'));
+    const tile = el('button', 'stat-tile mkt-tile');
+    tile.type = 'button';
+    tile.dataset.sym = sym;
+    tile.title = i18nT('Link the workspace to') + ' ' + sym + ' · ' + i18nT('double-click for details');
+    tile.append(el('div', 'st-label', i18nT(STRIP_LABELS[sym] || sym)));
+    const uncov = !q && state.uncovered.has(sym);
+    tile.append(el('div', 'st-value amount', q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : uncov ? i18nT('Not covered') : '—'));
     tile.appendChild(deltaChip(q));
+    tile.addEventListener('click', () => selectSymbol(sym));
+    tile.addEventListener('dblclick', () => openDrawer(sym));
     tiles.appendChild(tile);
   }
-  $('mktUpdated').textContent = state.lastUpdated ? 'Updated ' + fmtTime(state.lastUpdated) : '';
+  $('mktUpdated').textContent = state.lastUpdated ? i18nT('Updated') + ' ' + fmtTime(state.lastUpdated) : '';
 }
 
-/* ---- detail drawer -------------------------------------------------------- */
-let drawerSym = null, drawerRange = '1D';
+/* ---- detail drawer -----------------------------------------------------------
+   Everything about one symbol: the live quote, a full chart (the same chart
+   panel the workspace uses), fundamentals, upcoming events and recent news. It
+   opens only on an explicit request — double-click, Enter, or an ⓘ button —
+   and its header figures are PATCHED on every tick rather than frozen at open.
+
+   Async sections are guarded: every open bumps a token, and an answer that
+   arrives for an older token is dropped, so clicking quickly through symbols
+   can never paint AAPL's news under MSFT's title. The chart's range, type and
+   indicators are remembered while the page is open; type, volume and
+   indicators also become the default for new charts (settings.chartDefaults). */
+let drawerSym = null, drawerToken = 0, drawerCloseTimer = 0, drawerPanel = null, drawerRefs = null, drawerReturnFocus = null;
+let drawerChartState = null;
+
 function openDrawer(sym) {
-  drawerSym = sym; drawerRange = '1D';
+  const clean = normalizeSymbol(sym);
+  if (!clean) return;
+  clearTimeout(drawerCloseTimer);
+  const d = $('drawer');
+  const wasOpen = !d.hidden && d.classList.contains('open');
+  if (!wasOpen) drawerReturnFocus = document.activeElement;
   $('drawerScrim').hidden = false;
-  const d = $('drawer'); d.hidden = false; d.setAttribute('aria-hidden', 'false');
+  d.hidden = false;
+  d.setAttribute('aria-hidden', 'false');
   void d.offsetWidth;                 // force reflow so the slide-in transition plays reliably
   d.classList.add('open');
+  if (drawerSym === clean && drawerRefs) { refreshDrawer(); return; }
+  drawerSym = clean;
   renderDrawer();
+  // The drawer's symbol is now a watched one; fetch its quote if nothing has.
+  if (!state.quotes[clean] && scheduler) scheduler.now();
+  setTimeout(() => safe(() => $('drawerClose').focus({ preventScroll: true })), 30);
 }
+
 function closeDrawer() {
-  const d = $('drawer'); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true');
+  const d = $('drawer');
+  if (d.hidden) return;
+  d.classList.remove('open');
+  d.setAttribute('aria-hidden', 'true');
   $('drawerScrim').hidden = true;
-  setTimeout(() => { d.hidden = true; }, 250);
+  drawerToken++;
   drawerSym = null;
+  clearTimeout(drawerCloseTimer);
+  drawerCloseTimer = setTimeout(() => {
+    d.hidden = true;
+    if (drawerPanel) { safe(() => drawerPanel.destroy()); drawerPanel = null; }
+    drawerRefs = null;
+    $('drawerBody').textContent = '';
+  }, 250);
+  const back = drawerReturnFocus;
+  drawerReturnFocus = null;
+  if (back && typeof back.focus === 'function' && document.contains(back)) safe(() => back.focus({ preventScroll: true }));
 }
+
+function drawerIsOpen() { const d = $('drawer'); return !d.hidden && d.classList.contains('open'); }
+
 function wireDrawer() {
   $('drawerClose').addEventListener('click', closeDrawer);
   $('drawerScrim').addEventListener('click', closeDrawer);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeModal(); } });
+  /* Escape closes ONE thing: the topmost. Anything that handled the key itself
+     (a widget drag, a column menu, a tab rename, the chart's own popover, a
+     native <dialog>) calls preventDefault, and that ends it here. */
+  // On window, so it runs after every document-level handler has had its turn.
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    if (document.querySelector('dialog[open]')) return;
+    if (!$('modalScrim').hidden) { e.preventDefault(); closeModal(); return; }
+    if (drawerIsOpen()) { e.preventDefault(); closeDrawer(); return; }
+    if ($('rail').classList.contains('open')) { e.preventDefault(); setRailOpen(false); }
+  });
 }
-async function renderDrawer() {
-  const sym = drawerSym; if (!sym) return;
-  const q = state.quotes[sym];
-  const prof = await market.profile(sym).catch(() => null);
-  $('drawerTitle').textContent = sym + (prof ? ' · ' + prof.name : '');
+
+function renderDrawer() {
+  const sym = drawerSym;
+  if (!sym) return;
+  const my = ++drawerToken;
+  if (drawerPanel) { safe(() => drawerPanel.destroy()); drawerPanel = null; }
   const body = $('drawerBody');
   body.textContent = '';
+  const prof = store.profiles[sym] || null;
+  $('drawerTitle').textContent = sym + (prof && prof.name ? ' · ' + prof.name : '');
 
-  const sess = sessionFor(sym);
   const line = el('div', 'drawer-session');
-  const chip = el('span', 'tag ' + (sess.isTradeable ? 'live' : 'closed'), sess.label);
-  line.appendChild(chip);
-  const bits = [sess.detail, sess.nextLabel].filter(Boolean).join(' · ');
-  if (bits) line.append(el('span', 'ds-note', bits));
-  if (sess.approx) line.append(el('span', 'tag approx', 'approx'));
-  const froz = sess.isTradeable ? frozenMs(sym) : 0;
-  if (froz > staleThreshold()) line.append(el('span', 'tag stale', 'Stale ' + formatCountdown(froz)));
-  // The per-card bell is gone with the card grid — a widget may not write rules —
-  // so the route from "this symbol" to "alert me about it" lives here instead.
-  const ruleBtn = el('button', 'cs-btn sm ds-alert', '🔔 Alert rule');
+  const sessChip = el('span', 'tag closed', '');
+  const sessNote = el('span', 'ds-note', '');
+  const approx = el('span', 'tag approx', i18nT('approx'));
+  const stale = el('span', 'tag stale', '');
+  const ruleBtn = el('button', 'cs-btn sm ds-alert', '🔔 ' + i18nT('Alert rule'));
   ruleBtn.type = 'button';
-  const armed = safe(() => store.rulesFor(sym).filter((r) => r.armed).length, 0);
-  ruleBtn.title = armed ? armed + ' armed rule' + (armed === 1 ? '' : 's') + ' on ' + sym : 'No rules on ' + sym + ' yet';
-  if (armed) ruleBtn.appendChild(el('span', 'rule-badge', String(armed)));
   ruleBtn.addEventListener('click', () => openAlerts(sym));
-  line.append(el('span', 'spacer'), ruleBtn);
+  const ruleBadge = el('span', 'rule-badge', '');
+  ruleBtn.appendChild(ruleBadge);
+  line.append(sessChip, sessNote, approx, stale, el('span', 'spacer'), ruleBtn);
   body.appendChild(line);
 
-  const kv = el('div', 'kv-grid');
-  const pair = (k, v, tip) => {
-    kv.append(el('div', 'kv-k', k));
-    const d = el('div', 'kv-v amount', v);
-    if (tip) d.title = tip;
-    kv.append(d);
-  };
-  pair('Last', q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : '—');
-  // Every figure on this row inherits the price's precision, as the delta chip
-  // already did: two decimals turns a sub-dollar coin's whole day into "0.00".
-  pair('Change', q && q.changePct != null ? `${fmtMove(q.change, q.price)} (${fmtNum(q.changePct)}%)` : '—');
-  // The three-value vocabulary is too coarse for "an IEX close" versus "the
-  // official one", so the provider's own sentence is the tooltip when it has one.
-  pair('Baseline', baselineText(sym, q), q && q.baselineNote ? q.baselineNote : null);
-  pair('Open', q ? fmtMove(q.open, q.price) : '—');
-  pair('Prev close', q ? fmtMove(q.prevClose, q.price) : '—');
-  pair('Day range', q && q.low != null ? `${fmtMove(q.low, q.price)} – ${fmtMove(q.high, q.price)}` : '—');
-  pair('Volume', q && q.volume != null ? fmtInt(q.volume) : '—');
-  if (prof) { pair('Exchange', prof.exchange || '—'); pair('Sector', prof.sector || '—'); pair('Market cap', prof.marketCap ? fmtCap(prof.marketCap) : '—'); }
+  const kv = el('div', 'kv-grid ds-kv');
+  const cells = {};
+  for (const [k, label, learn] of [['last', 'Last', 'last-price'], ['change', 'Change', 'change'], ['baseline', 'Baseline', 'prev-close'],
+    ['open', 'Open', 'open-price'], ['prev', 'Prev close', 'prev-close'], ['range', 'Day range', 'day-range'], ['volume', 'Volume', 'volume'],
+    ['exchange', 'Exchange', null], ['sector', 'Sector', null]]) {
+    const kk = el('div', 'kv-k', i18nT(label));
+    if (learn) safe(() => kk.appendChild(helpIconFor(learn)));
+    cells[k] = el('div', 'kv-v' + (['exchange', 'sector'].includes(k) ? '' : ' amount'), '—');
+    kv.append(kk, cells[k]);
+  }
   body.appendChild(kv);
 
-  const tabs = el('div', 'range-tabs');
-  for (const r of ['1D', '1M', '1Y']) {
-    const b = el('button', 'range-tab' + (r === drawerRange ? ' active' : ''), r);
-    b.addEventListener('click', () => { drawerRange = r; renderDrawer(); });
-    tabs.appendChild(b);
-  }
-  body.appendChild(tabs);
+  const chartBox = el('div', 'ds-chart');
+  body.appendChild(chartBox);
+  const defaults = store.settings.chartDefaults || {};
+  drawerPanel = mountChartPanel(chartBox, {
+    getDeps: () => ({ ...getCtx(), quoteFor: (s) => state.quotes[s] || null, linkBus: null }),
+    state: drawerChartState,
+    defaults,
+    variant: 'drawer',
+    onState: (st) => {
+      drawerChartState = st;
+      // Type, volume and indicators become the default for new charts; range,
+      // interval, log and compare stay with this page session.
+      const next = { type: st.t, volume: st.v, indicators: st.ind.map((x) => ({ id: x.id, params: x.p })) };
+      if (JSON.stringify(next) !== JSON.stringify(store.settings.chartDefaults)) { store.settings.chartDefaults = next; safe(() => store.saveSettings()); }
+    },
+  });
+  drawerPanel.setSymbol(sym);
 
-  const chartWrap = el('div', 'chart-wrap');
-  const canvas = el('canvas', 'detail-chart');
-  chartWrap.appendChild(canvas);
-  body.appendChild(chartWrap);
+  const sec = (title, learn) => {
+    const h = el('h3', 'ds-sec', i18nT(title));
+    if (learn) safe(() => h.appendChild(helpIconFor(learn)));
+    const box = el('div', 'ds-box');
+    box.appendChild(el('p', 'field-note', i18nT('Loading…')));
+    body.append(h, box);
+    return box;
+  };
+  const fundBox = sec('Key statistics', 'market-cap');
+  const evBox = sec('Upcoming events', 'earnings-report');
+  const newsBox = sec('Recent news', null);
 
-  // Name the provider the router actually picked for candles — it is often not
-  // the one serving quotes (Finnhub has no free candles, for one).
-  const seriesId = safe(() => market.routeSeries(sym), 'demo');
-  const note = el('p', 'field-note', 'Series via ' + (PROVIDER_LABELS[seriesId] || seriesId) + '. Delayed · not advice.');
-  body.appendChild(note);
+  const seriesId = safe(() => market.routeCandles(sym, '1d', '1Y'), 'demo') || 'demo';
+  body.appendChild(el('p', 'field-note', i18nT('Bars via') + ' ' + (PROVIDER_LABELS[seriesId] || seriesId) + '. '
+    + i18nT('Double-click a symbol anywhere to open this panel; a single click only links the widgets.') + ' ' + i18nT('Delayed · not investment advice.')));
 
-  const pts = await market.series(sym, drawerRange).catch(() => []);
-  drawLineChart(canvas, pts);
+  drawerRefs = { sym, sessChip, sessNote, approx, stale, ruleBtn, ruleBadge, cells };
+  refreshDrawer();
+
+  // Profile, fundamentals, events and news arrive independently; each lands
+  // only if the drawer still shows the symbol that asked.
+  const live = () => my === drawerToken && drawerSym === sym;
+  market.profile(sym).then((p) => { if (!live() || !p) return; $('drawerTitle').textContent = sym + (p.name ? ' · ' + p.name : ''); refreshDrawer(); }).catch(() => {});
+  fundamentalsFor(sym).then((f) => { if (live()) renderFundamentals(fundBox, f, { quote: state.quotes[sym], fx: fxOpts(sym).fx }); })
+    .catch(() => { if (live()) renderFundamentals(fundBox, null); });
+  market.events(sym).then((ev) => { if (live()) renderEvents(evBox, ev); }).catch(() => { if (live()) renderEvents(evBox, null); });
+  market.news(sym, { limit: 8 }).then((n) => { if (live()) renderNewsList(newsBox, n, { compact: false }); }).catch(() => { if (live()) renderNewsList(newsBox, []); });
+  // Daily bars back the 52-week lines and pivots on the chart.
+  if (!dailyFor(sym)) dailyBars(sym).then(() => { if (live() && drawerPanel) drawerPanel.tick(); }).catch(() => {});
 }
+
+// Patch the header figures and the chart's live bar; called on every tick.
+function refreshDrawer() {
+  const r = drawerRefs;
+  if (!r || !drawerSym || r.sym !== drawerSym) return;
+  const sym = r.sym;
+  const q = state.quotes[sym];
+  const sess = sessionFor(sym);
+  setTxt(r.sessChip, sess.label);
+  r.sessChip.className = 'tag ' + (sess.isTradeable ? 'live' : 'closed');
+  setTxt(r.sessNote, [sess.detail, sess.nextLabel].filter(Boolean).join(' · '));
+  r.approx.hidden = !sess.approx;
+  const froz = sess.isTradeable ? frozenMs(sym) : 0;
+  r.stale.hidden = !(froz > staleThreshold());
+  if (!r.stale.hidden) setTxt(r.stale, i18nT('Stale') + ' ' + formatCountdown(froz));
+  const armed = safe(() => store.rulesFor(sym).filter((x) => x.armed).length, 0);
+  setTxt(r.ruleBadge, armed ? String(armed) : '');
+  r.ruleBadge.hidden = !armed;
+  r.ruleBtn.title = armed ? armed + ' ' + i18nT(armed === 1 ? 'armed rule on' : 'armed rules on') + ' ' + sym : i18nT('No rules on') + ' ' + sym + ' ' + i18nT('yet');
+  const c = r.cells;
+  const uncov = !q && state.uncovered.has(sym);
+  setTxt(c.last, q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : uncov ? i18nT('Not covered') : '—');
+  // Every figure on this row inherits the price's precision, as the delta chip
+  // already did: two decimals turns a sub-dollar coin's whole day into "0.00".
+  setTxt(c.change, q && q.changePct != null ? `${fmtMove(q.change, q.price)} (${fmtNum(q.changePct)}%)` : '—');
+  c.change.className = 'kv-v amount ' + (q && q.changePct > 0 ? 'pos' : q && q.changePct < 0 ? 'neg' : '');
+  // The three-value vocabulary is too coarse for "an IEX close" versus "the
+  // official one", so the provider's own sentence is the tooltip when it has one.
+  setTxt(c.baseline, baselineText(sym, q));
+  c.baseline.title = q && q.baselineNote ? i18nT(q.baselineNote) : '';
+  setTxt(c.open, q ? fmtMove(q.open, q.price) : '—');
+  setTxt(c.prev, q ? fmtMove(q.prevClose, q.price) : '—');
+  setTxt(c.range, q && q.low != null ? `${fmtMove(q.low, q.price)} – ${fmtMove(q.high, q.price)}` : '—');
+  setTxt(c.volume, q && q.volume != null ? fmtInt(q.volume) : '—');
+  const prof = store.profiles[sym];
+  setTxt(c.exchange, (prof && prof.exchange) || '—');
+  setTxt(c.sector, (prof && prof.sector) || '—');
+  if (drawerPanel) drawerPanel.tick();
+}
+
+function setTxt(node, t) { const v = t == null ? '' : String(t); if (node.textContent !== v) node.textContent = v; }
+function helpIconFor(id) { return helpIcon(id); }
 
 function baselineText(sym, q) {
   if (!q) return '—';
-  if (q.baseline === 'rolling_24h') return 'Rolling 24h (provider)';
-  if (q.baseline === 'prev_close') return 'Previous close (provider)';
-  if (marketForSymbol(sym, q) === 'CRYPTO') return 'Rolling 24h (inferred)';
-  return 'Not stated by provider';
-}
-
-/* ---- holdings editor -------------------------------------------------------
-   The Portfolio widget reports the numbers; widgets are readers and may not
-   touch storage, so entering, editing and deleting a holding happens in this
-   modal. It shows only the fields an edit needs — value and P/L belong to the
-   widget, and a second set of totals in a second place is a second thing to
-   disagree with. */
-
-// Totals are a plain sum with no FX conversion in it, so they may only carry a
-// currency symbol when every holding is quoted in the same one. Mixed holdings
-// get bare numbers and a line saying why, which is the honest shape of a figure
-// that adds dollars to rupees.
-function portfolioCurrency() {
-  const set = new Set();
-  for (const h of store.holdings) {
-    const c = state.quotes[h.symbol] && state.quotes[h.symbol].currency;
-    if (c) set.add(c);
-  }
-  if (set.size > 1) return false;
-  return set.size === 1 ? [...set][0] : null;
-}
-
-function openHoldings() {
-  openModal('holdingsModal', renderHoldings);
-}
-
-function renderHoldings() {
-  const { rows } = portfolioTotals(store.holdings, state.quotes);
-  const cur = portfolioCurrency();
-  const money = (v) => (v == null ? '—' : cur === false ? fmtNum(v) : fmtPrice(v, cur));
-  const note = $('holdCurNote');
-  note.hidden = cur !== false;
-  if (cur === false) {
-    note.textContent = 'Your holdings are quoted in more than one currency. Market values are shown without a currency '
-      + 'symbol, because nothing here converts between them.';
-  }
-
-  const body = $('holdBody');
-  body.textContent = '';
-  if (!rows.length) {
-    const tr = el('tr'); const td = el('td', 'empty-cell', i18nT('No holdings yet. Add one below.'));
-    td.colSpan = 6; tr.appendChild(td); body.appendChild(tr);
-    return;
-  }
-  for (const r of rows) {
-    const sym = r.holding.symbol;
-    const tr = el('tr'); tr.dataset.id = r.holding.id;
-    tr.append(el('td', 'sym', sym));
-    tr.append(el('td', 'num amount', fmtNum(r.shares)));
-    tr.append(el('td', 'num amount', fmtMove(r.avg, r.price)));
-    // An unpriced holding is not worth zero — it is worth an unknown amount, and
-    // the provider that did not cover it is the reason.
-    tr.append(el('td', 'num amount', r.price != null
-      ? fmtPrice(r.price, state.quotes[sym] && state.quotes[sym].currency, fxOpts(sym))
-      : (state.uncovered && state.uncovered.has(sym) ? 'Not covered' : '—')));
-    tr.append(el('td', 'num amount', money(r.marketValue)));
-    const edit = el('td');
-    const eb = el('button', 'icon-mini', '✎');
-    eb.type = 'button';
-    eb.title = 'Edit ' + sym;
-    eb.setAttribute('aria-label', 'Edit holding ' + sym);
-    eb.addEventListener('click', () => openHolding(r.holding));
-    edit.appendChild(eb); tr.appendChild(edit);
-    body.appendChild(tr);
-  }
+  if (q.baseline === 'rolling_24h') return i18nT('Rolling 24h (provider)');
+  if (q.baseline === 'prev_close') return i18nT('Previous close (provider)');
+  if (marketForSymbol(sym, q) === 'CRYPTO') return i18nT('Rolling 24h (inferred)');
+  return i18nT('Not stated by provider');
 }
 
 /* ---- controls ------------------------------------------------------------- */
@@ -858,26 +1199,59 @@ function wireControls() {
   $('btnAdd').addEventListener('click', () => openModal('addModal', () => { $('addSearch').value = ''; $('addAuto').textContent = ''; $('addSearch').focus(); }));
   $('viewWatch').addEventListener('click', () => gotoView('watch'));
   $('viewPort').addEventListener('click', () => gotoView('port'));
-  $('btnHoldings').addEventListener('click', openHoldings);
+  $('btnHoldings').addEventListener('click', () => ledgerUI && ledgerUI.open());
   $('btnPrivacy').addEventListener('click', () => { setPrivacy(!store.settings.privacy); publishState(); });
-  $('btnAlerts').addEventListener('click', () => openAlerts(store.watchlist[0] || ''));
+  $('btnAlerts').addEventListener('click', () => openAlerts(state.selection || store.watchlist[0] || ''));
+  // Phones and tablets: the rail is off-canvas below 900px and this is its door.
+  const railBtn = $('btnRail');
+  if (railBtn) railBtn.addEventListener('click', () => setRailOpen(!$('rail').classList.contains('open')));
+  document.addEventListener('pointerdown', (e) => {
+    const rail = $('rail');
+    if (!rail.classList.contains('open')) return;
+    if (rail.contains(e.target) || (railBtn && railBtn.contains(e.target))) return;
+    setRailOpen(false);
+  }, true);
   $('btnSettings').addEventListener('click', openSettings);
   $('btnDisplays').addEventListener('click', () => openSettings('displaysSection'));
   $('sessChip').addEventListener('click', () => {
     safe(() => market.refreshMarketStatus());
     pollStatus(true);
-    toast('Re-checking the session with your data provider.');
+    toast(i18nT('Re-checking the session with your data provider.'));
   });
   $('sortSel').addEventListener('change', () => { renderRail(); refreshWidgets(); });
 
   wireAutocomplete($('railSearch'), $('railAuto'), (sym) => { if (store.addSymbol(sym)) { $('railSearch').value = ''; $('railAuto').hidden = true; refreshAll(); } });
   $('emptyAdd').addEventListener('click', () => $('btnAdd').click());
   $('emptyDemo').addEventListener('click', () => { store.watchlist = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'SPY', 'AMD']; store.saveWatchlist(); refreshAll(); });
-  $('addHolding').addEventListener('click', () => openHolding(null));
 
-  $('ackBtn').addEventListener('click', () => { store.settings.ack = true; store.saveSettings(); $('ackGate').hidden = true; });
+  // First run is two short steps on one card: what this tool is (and is not),
+  // then how much of it to show first. A returning user who acknowledged before
+  // levels existed is never sent back through it (see noticeLevel).
+  $('ackBtn').addEventListener('click', () => {
+    store.settings.ack = true; store.saveSettings();
+    if (store.settings.levelChosen) { $('ackGate').hidden = true; return; }
+    $('ackStep1').hidden = true;
+    $('ackStep2').hidden = false;
+    const first = document.querySelector('#ackStep2 .ack-lv[data-level="' + normalizeLevel(store.settings.level) + '"]')
+      || document.querySelector('#ackStep2 .ack-lv');
+    if (first) first.focus();
+  });
+  for (const b of document.querySelectorAll('#ackStep2 .ack-lv')) {
+    b.addEventListener('click', () => chooseFirstLevel(b.dataset.level));
+  }
 
   setPrivacy(store.settings.privacy);
+}
+
+function setRailOpen(on) {
+  const rail = $('rail');
+  rail.classList.toggle('open', !!on);
+  const b = $('btnRail');
+  if (b) { b.setAttribute('aria-expanded', on ? 'true' : 'false'); b.classList.toggle('active', !!on); }
+  if (on) setTimeout(() => safe(() => $('railSearch').focus({ preventScroll: true })), 50);
+}
+function closeRailOnMobile() {
+  if ($('rail').classList.contains('open') && safe(() => matchMedia('(max-width: 900px)').matches, false)) setRailOpen(false);
 }
 
 /* body.privacy-on covers the chrome. A widget applies the blur itself from
@@ -910,7 +1284,7 @@ function wireHashBanner() {
     banner.hidden = true;
     mountWorkspace();
     refreshAll();
-    toast('Shared watchlist saved to this browser.');
+    toast(i18nT('Shared watchlist saved to this browser.'));
   });
 
   $('hashDiscard').addEventListener('click', () => {
@@ -921,7 +1295,7 @@ function wireHashBanner() {
       // showing the tabs the shared view was arranged in.
       mountWorkspace();
       refreshAll();
-      toast('Shared view discarded — your saved watchlist is back.');
+      toast(i18nT('Shared view discarded — your saved watchlist is back.'));
     } else {
       location.hash = '';
       location.reload();
@@ -967,7 +1341,7 @@ function wireAutocomplete(input, box, onPick) {
         const row = el('div', 'ac-row'); row.setAttribute('role', 'option');
         row.dataset.sym = typed;
         row.append(el('span', 'ac-sym', typed));
-        row.append(el('span', 'ac-desc', 'Add symbol'));
+        row.append(el('span', 'ac-desc', i18nT('Add symbol')));
         row.addEventListener('click', () => onPick(row.dataset.sym));
         box.appendChild(row);
       }
@@ -988,16 +1362,48 @@ function wireAutocomplete(input, box, onPick) {
 }
 
 /* ---- modals --------------------------------------------------------------- */
+// Focus moves into the dialog and back to whatever opened it, so a keyboard or
+// screen-reader user is never left on a control hidden behind the scrim.
+let modalReturnFocus = null;
 function openModal(id, after) {
+  const wasOpen = !$('modalScrim').hidden;
+  if (!wasOpen) modalReturnFocus = document.activeElement;
   $('modalScrim').hidden = false;
   for (const m of document.querySelectorAll('.modal')) m.hidden = m.id !== id;
   if (after) after();
+  const m = $(id);
+  if (m && !m.contains(document.activeElement)) {
+    const f = m.querySelector('.modal-body input:not([type=hidden]):not([disabled]), .modal-body select, .modal-body textarea, .modal-body button, .modal-x');
+    if (f) safe(() => f.focus({ preventScroll: true }));
+  }
 }
 function closeModal() {
   $('modalScrim').hidden = true;
   for (const m of document.querySelectorAll('.modal')) m.hidden = true;
+  const back = modalReturnFocus; modalReturnFocus = null;
+  if (back && back.isConnected && typeof back.focus === 'function') safe(() => back.focus({ preventScroll: true }));
 }
 function wireModals() {
+  // Every modal is announced as a dialog named by its own title.
+  let n = 0;
+  for (const m of document.querySelectorAll('.modal')) {
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    const t = m.querySelector('.modal-title');
+    if (t) { if (!t.id) t.id = 'modalTitle' + (++n); m.setAttribute('aria-labelledby', t.id); }
+  }
+  // Tab stays inside the open modal.
+  $('modalScrim').addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const m = [...document.querySelectorAll('.modal')].find((x) => !x.hidden);
+    if (!m) return;
+    const f = [...m.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((x) => x.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
   $('modalScrim').addEventListener('click', (e) => { if (e.target === $('modalScrim')) closeModal(); });
   for (const x of document.querySelectorAll('[data-close]')) x.addEventListener('click', closeModal);
 
@@ -1011,18 +1417,38 @@ function wireModals() {
   $('btnImport').addEventListener('click', () => $('importFile').click());
   $('importFile').addEventListener('change', doImport);
   $('btnClearData').addEventListener('click', () => {
-    if (confirm('Erase all watchlists, holdings, rules, keys and settings from this browser?')) { store.clearAll(); location.reload(); }
+    if (confirm(i18nT('Erase all watchlists, holdings, rules, keys and settings from this browser?'))) { store.clearAll(); location.reload(); }
   });
 
-  // Alerts
-  $('ruleAdd').addEventListener('click', addRuleFromForm);
-  $('ruleSym').addEventListener('change', updateRuleSessionNote);
-  $('logFilter').addEventListener('change', (e) => { state.logFilter = e.target.value; renderAlertLog(); });
-  $('btnLogCsv').addEventListener('click', exportAlertLog);
-
-  // Holding
-  $('holdSave').addEventListener('click', saveHolding);
-  $('holdDelete').addEventListener('click', deleteHolding);
+  // Alerts and transactions: their dialogs live in their own modules; this file
+  // hands them the few things only the controller knows.
+  alertsUI = initAlertsUI({
+    store, openModal, toast,
+    quotes: () => state.quotes,
+    sessionFor, marketFor,
+    routeQuote: (sym) => market.routeQuote(sym),
+    extHours: EXT_HOURS, providerLabels: PROVIDER_LABELS,
+    level: () => store.settings.level || 'standard',
+    heldSymbols: () => { const pf = folio(); return pf ? pf.positions.map((p) => p.symbol) : []; },
+    dailyFor,
+    ensureBars: (sym) => dailyBars(sym),
+    fundFor: (sym) => (state.fund[sym] ? state.fund[sym].f : null),
+    ensureFund,
+    portfolioTotals: () => { const pf = folio(); return pf && !pf.empty ? pf.totals : null; },
+    onChange: () => { refreshWidgets(); publishState(); },
+    downloadFile, fxOpts,
+  });
+  ledgerUI = initLedgerUI({
+    store, openModal, closeModal, toast,
+    quotes: () => state.quotes,
+    level: () => store.settings.level || 'standard',
+    portfolio: (ledger) => (ledger ? safe(() => computePortfolio({ ledger, quotes: state.quotes, baseCurrency: store.settings.baseCurrency,
+      method: store.settings.costMethod, profileFor })) : folio()),
+    profileFor,
+    downloadFile,
+    positionsCSV: () => positionsCSV(folio()),
+    onChange: () => { refreshAll(); },
+  });
 }
 
 /* ---- settings ------------------------------------------------------------- */
@@ -1039,6 +1465,9 @@ function applySettingsToUI() {
   $('setInterval').value = s.interval;
   $('setNotify').checked = s.notify; $('setSound').checked = s.sound;
   $('setMarket').checked = s.showMarket; $('setPrivacy').checked = s.privacy;
+  if ($('setStrip')) $('setStrip').value = stripSymbols().join(', ');
+  if ($('setBaseCcy')) $('setBaseCcy').value = s.baseCurrency || 'USD';
+  if ($('setCostMethod')) $('setCostMethod').value = s.costMethod === 'avg' ? 'avg' : 'fifo';
   updateProviderConfig();
 }
 
@@ -1048,8 +1477,8 @@ function updateProviderConfig() {
   for (const box of document.querySelectorAll('.provider-config')) box.hidden = box.dataset.provider !== sel;
   const universal = $('setUniversal').checked;
   $('providerModeNote').textContent = universal
-    ? `Every symbol uses ${PROVIDER_LABELS[sel] || sel}.`
-    : 'Auto-route: equities use the selected stock provider, crypto uses CoinGecko (keyless), FX uses Twelve Data. Symbols are grouped so each provider gets one batched call — add keys for whichever providers you use.';
+    ? i18nF('Every symbol uses {provider}.', { provider: PROVIDER_LABELS[sel] || sel })
+    : i18nT('Auto-route: equities use the selected stock provider, crypto uses CoinGecko (keyless), FX uses Twelve Data. Symbols are grouped so each provider gets one batched call — add keys for whichever providers you use.');
 }
 function openSettings(scrollTo) {
   openModal('settingsModal', () => {
@@ -1057,6 +1486,8 @@ function openSettings(scrollTo) {
     $('keyStatus').textContent = '';
     renderDisplays();
     reportStorage();
+    paintLevelChrome();
+    startProviderPanel();
     if (scrollTo) safe(() => $(scrollTo).scrollIntoView({ block: 'start' }));
   });
 }
@@ -1074,6 +1505,16 @@ async function saveSettings() {
   s.interval = Math.max(5, Math.min(600, +$('setInterval').value || 15));
   s.notify = $('setNotify').checked; s.sound = $('setSound').checked;
   s.showMarket = $('setMarket').checked; s.privacy = $('setPrivacy').checked;
+  if ($('setStrip')) {
+    const list = $('setStrip').value.split(/[\s,;]+/).map((x) => normalizeSymbol(x)).filter(Boolean);
+    s.stripSymbols = [...new Set(list)].slice(0, 10);
+    if (!s.stripSymbols.length) s.stripSymbols = DEFAULT_STRIP.slice();
+  }
+  if ($('setBaseCcy')) {
+    const c = $('setBaseCcy').value.trim().toUpperCase();
+    if (/^[A-Z]{3}$/.test(c)) s.baseCurrency = c;
+  }
+  if ($('setCostMethod')) s.costMethod = $('setCostMethod').value === 'avg' ? 'avg' : 'fifo';
   store.saveSettings();
   $('intervalSel').value = String(s.interval);
   setPrivacy(s.privacy);
@@ -1088,14 +1529,14 @@ async function saveSettings() {
     try { await Notification.requestPermission(); } catch (e) {}
   }
   // validate keys (best-effort)
-  const status = $('keyStatus'); status.textContent = 'Checking keys…';
+  const status = $('keyStatus'); status.textContent = i18nT('Checking keys…');
   const parts = [];
   if (s.finnhubKey) parts.push('Finnhub ' + (await market.validate('finnhub').catch(() => false) ? '✓' : '✕'));
   if (s.twelvedataKey) parts.push('Twelve Data ' + (await market.validate('twelvedata').catch(() => false) ? '✓' : '✕'));
   if (s.polygonKey) parts.push('Polygon ' + (await market.validate('polygon').catch(() => false) ? '✓' : '✕'));
   if (s.alphaVantageKey) parts.push('Alpha Vantage ' + (await market.validate('alphavantage').catch(() => false) ? '✓' : '✕'));
   if (s.alpacaKeyId && s.alpacaSecret) parts.push('Alpaca ' + (await market.validate('alpaca').catch(() => false) ? '✓' : '✕'));
-  status.textContent = parts.join('  ·  ') || 'Demo mode (no keys).';
+  status.textContent = parts.join('  ·  ') || i18nT('Demo mode (no keys).');
   refreshAll();
 }
 
@@ -1116,9 +1557,10 @@ function doImport(e) {
       refreshAll();
       const dropped = r && r.dropped ? Object.values(r.dropped).reduce((a, b) => a + b, 0) : 0;
       toast(r
-        ? `Imported ${r.watchlist} symbols, ${r.rules} rules, ${r.holdings} holdings.` + (dropped ? ` ${dropped} unreadable entries were skipped.` : '')
-        : 'Imported.');
-    } catch (err) { toast('Import failed: ' + err.message, 'err'); }
+        ? i18nF('Imported {symbols} symbols, {rules} rules, {txns} transactions.', { symbols: r.watchlist, rules: r.rules, txns: r.ledger })
+          + (dropped ? ' ' + i18nF('{n} unreadable entries were skipped.', { n: dropped }) : '')
+        : i18nT('Imported.'));
+    } catch (err) { toast(i18nT('Import failed:') + ' ' + err.message, 'err'); }
   };
   rd.readAsText(f); e.target.value = '';
 }
@@ -1137,9 +1579,9 @@ function reportStorage() {
   const size = fmtBytes(info.bytes);
   note.classList.toggle('warn-note', !!info.quotaHit);
   note.textContent = info.quotaHit
-    ? 'A save to this browser failed — storage is full (' + size + ' in use). Export your data, then clear cached charts with "Clear all data" or free space in your browser settings. Until then, new holdings, rules and settings may not survive a reload.'
-    : 'Using ' + size + ' of this browser’s storage.';
-  if (info.quotaHit && !reportStorage.warned) { reportStorage.warned = true; toast('Browser storage is full — recent changes may not be saved.', 'err'); }
+    ? i18nF('A save to this browser failed — storage is full ({size} in use). Export your data, then clear cached charts with "Clear all data" or free space in your browser settings. Until then, new holdings, rules and settings may not survive a reload.', { size })
+    : i18nF('Using {size} of this browser’s storage.', { size });
+  if (info.quotaHit && !reportStorage.warned) { reportStorage.warned = true; toast(i18nT('Browser storage is full — recent changes may not be saved.'), 'err'); }
 }
 
 /* ---- API budget widget ------------------------------------------------------
@@ -1173,7 +1615,7 @@ function renderQuota() {
   if (!worst && !totalMin && !totalHour) {
     bar.style.width = '0%';
     bar.classList.remove('hot');
-    $('quotaTxt').textContent = market.modeLabel().live ? 'No calls yet.' : 'Demo mode — no API calls.';
+    $('quotaTxt').textContent = i18nT(market.modeLabel().live ? 'No calls yet.' : 'Demo mode — no API calls.');
     $('quotaSub').textContent = '';
     return;
   }
@@ -1183,15 +1625,15 @@ function renderQuota() {
   bar.classList.toggle('hot', pct >= 80);
 
   $('quotaTxt').textContent = worst && worst.cap
-    ? `${PROVIDER_LABELS[worst.id] || worst.id} ${worst.used}/${worst.cap} per min`
-    : `${totalMin} calls in the last minute`;
+    ? `${PROVIDER_LABELS[worst.id] || worst.id} ${worst.used}/${worst.cap} ` + i18nT('per min')
+    : i18nF('{n} calls in the last minute', { n: totalMin });
   const others = Object.keys(by).length;
   $('quotaSub').textContent = totalHour
-    ? `${totalHour} in the last hour${others > 1 ? ' · ' + others + ' providers' : ''}`
+    ? i18nF('{n} in the last hour', { n: totalHour }) + (others > 1 ? ' · ' + i18nF('{n} providers', { n: others }) : '')
     : '';
   box.title = Object.entries(by)
     .map(([id, v]) => `${PROVIDER_LABELS[id] || id}: ${perMin(v)}/min${RATE_CEILING[id] ? ' of ' + RATE_CEILING[id] : ''}`)
-    .join('\n') || 'No provider calls recorded.';
+    .join('\n') || i18nT('No provider calls recorded.');
 }
 
 function wireQuota() {
@@ -1210,7 +1652,7 @@ function wireQuota() {
    else says so instead of the UI pretending the monitor choice took effect. */
 function wireDisplays() {
   const panelSel = $('dispPanel');
-  for (const p of PANELS) { const o = el('option', null, p.label); o.value = p.id; panelSel.appendChild(o); }
+  for (const p of PANELS) { const o = el('option', null, i18nT(p.label)); o.value = p.id; panelSel.appendChild(o); }
   panelSel.addEventListener('change', renderPanelDesc);
   renderPanelDesc();
 
@@ -1220,7 +1662,7 @@ function wireDisplays() {
     const list = await displays.detectScreens().catch(() => []);
     fillScreenPicker(list || []);
     renderDisplays();
-    if (!list || list.length < 2) toast('One monitor detected — panels will open on this screen.');
+    if (!list || list.length < 2) toast(i18nT('One monitor detected — panels will open on this screen.'));
   });
 
   $('dispOpen').addEventListener('click', () => {
@@ -1236,8 +1678,8 @@ function wireDisplays() {
     });
     Promise.resolve(res).then((r) => {
       if (!r) return;
-      if (r.reason === 'popup-blocked') toast('Popup blocked — allow popups for this site, then try again.', 'err');
-      else if (r.reason === 'unknown-panel') toast('That panel does not exist.', 'err');
+      if (r.reason === 'popup-blocked') toast(i18nT('Popup blocked — allow popups for this site, then try again.'), 'err');
+      else if (r.reason === 'unknown-panel') toast(i18nT('That panel does not exist.'), 'err');
       renderDisplays();
     }).catch(() => {});
   });
@@ -1250,7 +1692,7 @@ function wireDisplays() {
 
 function renderPanelDesc() {
   const p = PANELS.find((x) => x.id === $('dispPanel').value);
-  $('dispPanelDesc').textContent = p ? p.desc : '';
+  $('dispPanelDesc').textContent = p ? i18nT(p.desc) : '';
 }
 
 function fillScreenPicker(list) {
@@ -1258,7 +1700,7 @@ function fillScreenPicker(list) {
   const sel = $('dispScreen');
   const prev = sel.value;
   sel.textContent = '';
-  const none = el('option', null, state.screens.length ? 'Wherever the browser puts it' : 'This monitor');
+  const none = el('option', null, i18nT(state.screens.length ? 'Wherever the browser puts it' : 'This monitor'));
   none.value = '';
   sel.appendChild(none);
   for (const s of state.screens) {
@@ -1294,8 +1736,8 @@ function renderDisplays() {
   for (const [k, [tone, text]] of rows) {
     const row = el('div', 'cap-row');
     row.append(el('span', 'cap-dot ' + tone));
-    row.append(el('span', 'cap-k', k));
-    row.append(el('span', 'cap-v', text));
+    row.append(el('span', 'cap-k', i18nT(k)));
+    row.append(el('span', 'cap-v', i18nT(text)));
     caps.appendChild(row);
   }
 
@@ -1304,16 +1746,16 @@ function renderDisplays() {
   const list = $('dispOpenList');
   list.textContent = '';
   if (!open.length && !orphans.length) {
-    list.appendChild(el('p', 'field-note', 'No panels open.'));
+    list.appendChild(el('p', 'field-note', i18nT('No panels open.')));
   } else {
     for (const p of open) {
       const panel = PANELS.find((x) => x.id === p.panelId);
       const row = el('div', 'disp-row');
-      row.append(el('span', 'dr-name', panel ? panel.label : p.panelId));
-      row.append(el('span', 'tag ' + (p.alive ? 'live' : 'closed'), p.mode === 'pip' ? 'Picture-in-Picture' : 'Window'));
+      row.append(el('span', 'dr-name', panel ? i18nT(panel.label) : p.panelId));
+      row.append(el('span', 'tag ' + (p.alive ? 'live' : 'closed'), i18nT(p.mode === 'pip' ? 'Picture-in-Picture' : 'Window')));
       row.append(el('span', 'dr-where', p.mode === 'pip' ? 'browser-placed' : screenLabel(p.screenId)));
       if (p.placed === false) row.append(el('span', 'tag stale', 'placement ignored'));
-      const x = el('button', 'cs-btn', 'Close');
+      const x = el('button', 'cs-btn', i18nT('Close'));
       x.addEventListener('click', () => { displays.close(p.panelId); renderDisplays(); });
       row.append(el('span', 'spacer'), x);
       list.appendChild(row);
@@ -1326,17 +1768,17 @@ function renderDisplays() {
     for (const p of orphans) {
       const panel = PANELS.find((x) => x.id === p.panelId);
       const row = el('div', 'disp-row');
-      row.append(el('span', 'dr-name', panel ? panel.label : p.panelId));
-      row.append(el('span', 'tag closed', 'Detached'));
+      row.append(el('span', 'dr-name', panel ? i18nT(panel.label) : p.panelId));
+      row.append(el('span', 'tag closed', i18nT('Detached')));
       row.append(el('span', 'dr-where', 'opened before this page loaded'));
-      const re = el('button', 'cs-btn', 'Re-open');
-      re.title = 'Reconnect to the panel window if it is still open, or open it again if it is not.';
+      const re = el('button', 'cs-btn', i18nT('Re-open'));
+      re.title = i18nT('Reconnect to the panel window if it is still open, or open it again if it is not.');
       re.addEventListener('click', () => {
         Promise.resolve(safe(() => displays.open(p.panelId, { mode: p.mode, screenId: p.screenId })))
           .then(() => renderDisplays()).catch(() => {});
       });
-      const forget = el('button', 'cs-btn', 'Forget');
-      forget.title = 'Stop listing this panel. Any window still open must be closed from its own controls.';
+      const forget = el('button', 'cs-btn', i18nT('Forget'));
+      forget.title = i18nT('Stop listing this panel. Any window still open must be closed from its own controls.');
       forget.addEventListener('click', () => { displays.close(p.panelId); renderDisplays(); });
       row.append(el('span', 'spacer'), re, forget);
       list.appendChild(row);
@@ -1347,190 +1789,335 @@ function renderDisplays() {
   const note = $('dispPlaceNote');
   note.hidden = !ignored;
   if (ignored) {
-    note.textContent = 'Your desktop ignored the placement request — Wayland and most tiling window managers do not let a '
-      + 'web page position windows. Nothing is broken: drag the panel onto the monitor you want and it will stay there.';
+    note.textContent = i18nT('Your desktop ignored the placement request — Wayland and most tiling window managers do not let a '
+      + 'web page position windows. Nothing is broken: drag the panel onto the monitor you want and it will stay there.');
   }
 }
 
-/* ---- alerts modal --------------------------------------------------------- */
-function openAlerts(sym) {
-  openModal('alertsModal', () => {
-    const sel = $('ruleSym'); sel.textContent = '';
-    const syms = [...new Set([...store.watchlist, ...store.rules.map((r) => r.symbol)])].filter(Boolean);
-    for (const s of syms) { const o = el('option', null, s); o.value = s; sel.appendChild(o); }
-    if (sym) sel.value = sym;
-    $('ruleSess').value = 'regular';
-    updateRuleSessionNote();
-    renderRuleList(); renderAlertLog();
+/* ---- experience level ---------------------------------------------------------
+   Beginner / Standard / Pro decides what is OFFERED first — which chart types,
+   indicators, alert conditions, portfolio columns and widgets are in front of
+   the user — never what data is kept or what is possible: everything gated is
+   one click ("Show all widgets", the level switch) away. Changing level never
+   moves a widget; the layout templates are applied only on first run or when
+   asked for by name. */
+function levelNow() { return normalizeLevel(store.settings.level); }
+
+function setLevel(lv, o = {}) {
+  const next = normalizeLevel(lv);
+  const changed = next !== store.settings.level;
+  store.settings.level = next;
+  store.settings.levelChosen = true;
+  store.saveSettings();
+  if (o.layout) safe(() => workspace.reset(next));
+  // Widgets build some level-dependent structure once (help icons, columns),
+  // so a level change rebuilds them; layout and widget state live on the model.
+  else if (changed) safe(() => workspace.relabel());
+  paintLevelChrome();
+  publishState();
+  if (changed && !o.quiet) {
+    toast(i18nF('Level set to {level}.', { level: i18nT(LEVELS[next].label) }) + ' '
+      + i18nT(o.layout ? 'The layout was replaced with this level’s starting layout.'
+        : 'Your widgets stay where they are. “Reset layout” gives you this level’s starting layout.'));
+  }
+}
+
+function chooseFirstLevel(lv) {
+  setLevel(lv, { layout: true, quiet: true });
+  $('ackGate').hidden = true;
+  $('ackStep1').hidden = false;
+  $('ackStep2').hidden = true;
+  if (normalizeLevel(lv) === 'beginner' && !store.learn.tourDone) setTimeout(() => startAppTour(), 400);
+  else toast(i18nF('Level set to {level}.', { level: i18nT(LEVELS[normalizeLevel(lv)].label) }) + ' '
+    + i18nT('Press ? for keyboard shortcuts, or Ctrl+K for the command palette.'));
+}
+
+// Someone who acknowledged before levels existed was given 'standard' by the
+// store migration. Tell them once where the switch is, rather than re-gating.
+function noticeLevel() {
+  if (store.settings.levelChosen || store.settings.levelHintShown) return;
+  store.settings.levelHintShown = true;
+  safe(() => store.saveSettings());
+  setTimeout(() => toast(i18nT('New: choose Beginner, Standard or Pro from the level button in the header. It changes what is shown first, never your data.')), 2500);
+}
+
+function paintLevelChrome() {
+  const lv = levelNow();
+  document.body.dataset.level = lv;
+  const b = $('btnLevel');
+  if (b) {
+    setTxt($('btnLevelTxt'), i18nT(LEVELS[lv].label));
+    b.title = i18nT('Experience level') + ': ' + i18nT(LEVELS[lv].label) + ' — ' + i18nT(LEVELS[lv].summary);
+  }
+  const pal = $('btnPalette');
+  if (pal) pal.hidden = !levelAllows(lv, 'commandPalette');
+  if (levelPick) levelPick.setLevel(lv);
+  if (settingsLevelPick) settingsLevelPick.setLevel(lv);
+  const sum = $('levelPopSummary'); if (sum) setTxt(sum, i18nT(LEVELS[lv].summary));
+  const ssum = $('setLevelSummary'); if (ssum) setTxt(ssum, i18nT(LEVELS[lv].summary));
+  const lay = $('levelPopLayout'); if (lay) setTxt(lay, i18nF('Use the {level} starting layout', { level: i18nT(LEVELS[lv].label) }));
+}
+
+let levelPick = null, settingsLevelPick = null;
+function wireLevel() {
+  const btn = $('btnLevel'), pop = $('levelPop');
+  if (btn && pop) {
+    levelPick = levelPicker(levelNow(), (lv) => setLevel(lv));
+    $('levelPopPicker').appendChild(levelPick);
+    const close = (focus) => { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); if (focus) btn.focus(); };
+    btn.addEventListener('click', () => {
+      if (!pop.hidden) { close(false); return; }
+      const r = btn.getBoundingClientRect();
+      pop.hidden = false;
+      const w = pop.offsetWidth;
+      pop.style.top = Math.round(r.bottom + 6) + 'px';
+      pop.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))) + 'px';
+      btn.setAttribute('aria-expanded', 'true');
+      const on = pop.querySelector('[aria-checked="true"]'); if (on) on.focus();
+    });
+    pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); } });
+    document.addEventListener('pointerdown', (e) => { if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) close(false); }, true);
+    $('levelPopLayout').addEventListener('click', () => {
+      const lv = levelNow();
+      if (!confirm(i18nT('Discard your tabs and widgets and restore the default workspace?') + '\n' + i18nT('Layout') + ': ' + i18nT(LEVELS[lv].label))) return;
+      close(false);
+      setLevel(lv, { layout: true, quiet: true });
+      toast(i18nT('The layout was replaced with this level’s starting layout.'));
+    });
+    $('levelPopLearn').addEventListener('click', () => { close(false); openLessons(); });
+  }
+  // The same switch in Settings, with the three layout templates beside it.
+  const host = $('setLevelPicker');
+  if (host) {
+    settingsLevelPick = levelPicker(levelNow(), (lv) => setLevel(lv));
+    host.appendChild(settingsLevelPick);
+  }
+  for (const b of document.querySelectorAll('[data-layout-level]')) {
+    b.addEventListener('click', () => {
+      const lv = b.dataset.layoutLevel;
+      if (!confirm(i18nT('Discard your tabs and widgets and restore the default workspace?') + '\n' + i18nT('Layout') + ': ' + i18nT(LEVELS[lv].label))) return;
+      safe(() => workspace.reset(lv));
+      toast(i18nF('{level} layout restored. Your level is still {current}.', { level: i18nT(LEVELS[lv].label), current: i18nT(LEVELS[levelNow()].label) }));
+    });
+  }
+  paintLevelChrome();
+}
+
+/* ---- learning -----------------------------------------------------------------
+   learn.js never touches storage; the store's learn section is handed to it here. */
+function wireLearn() {
+  learnConfigure({
+    seen: () => store.learn.seen,
+    onSeen: (id) => { safe(() => store.markSeen(id)); },
+    level: () => levelNow(),
+  });
+  const b = $('btnLearn');
+  if (b) b.addEventListener('click', () => openLessons());
+  // Warm the glossary so the first '?' popover is instant and the palette can
+  // search terms on its first opening.
+  const warm = () => safe(() => loadGlossary().then((m) => { glossaryForPalette = m; }));
+  setTimeout(warm, 1500);
+  window.addEventListener('carino:langchange', warm);
+}
+
+/* The first-run tour points at the real controls. Steps whose target is hidden
+   (the rail on a phone, the API meter in demo mode) are skipped by startTour. */
+function startAppTour() {
+  closeModal();
+  if (drawerIsOpen()) closeDrawer();
+  const steps = [
+    { title: i18nT('Welcome to Carino Stocks'), body: i18nT('A one-minute tour of the screen. Stocks shows prices, charts and your own portfolio — it never trades and gives no advice. You can replay this from Learn.') },
+    { target: '#modeChip', title: i18nT('Where prices come from'), body: i18nT('DEMO means bundled sample data. With your own free API key it shows the provider, and whether prices are live or delayed.') },
+    { target: '#railList', title: i18nT('Your watchlist'), body: i18nT('The symbols you follow. Click one to show it in the chart and other linked widgets; double-click for full details.') },
+    { target: '#railSearch', title: i18nT('Add a symbol'), body: i18nT('Type a ticker such as AAPL, a crypto like BTC, or a currency pair like EURUSD.') },
+    { target: '.wk-tabs', title: i18nT('Tabs and widgets'), body: i18nT('Each tab holds widgets you can move, resize, add or remove. Nothing you do here can be lost from the data.') },
+    { target: '#sessChip', title: i18nT('Is the market open?'), body: i18nT('Pre-market, open, after hours or closed, from this device’s clock and the exchange calendar.') },
+    { target: '#btnAlerts', title: i18nT('Alerts'), body: i18nT('Get a notification when a price crosses a level you choose. Alerts only run while a Stocks tab is open.') },
+    { target: '#btnHoldings', title: i18nT('Your portfolio'), body: i18nT('Record what you own to see its value and gains. Entered by hand or imported from a broker CSV; never connected to an account.') },
+    { target: '#btnLearn', title: i18nT('Learn as you go'), body: i18nT('Short lessons and a glossary. Every “?” next to a term opens its explanation.') },
+    { target: '#btnLevel', title: i18nT('Your experience level'), body: i18nT('Beginner keeps things simple. Switch to Standard or Pro any time for more charts, alerts and tools.') },
+  ];
+  startTour(steps, {
+    onEnd: () => { store.learn.tourDone = true; safe(() => store.saveLearn()); },
   });
 }
 
-// A scope the routed provider cannot observe is a rule that can never fire, so
-// the option is withdrawn and the reason stated rather than silently offered.
-function updateRuleSessionNote() {
-  const sym = $('ruleSym').value;
-  const sel = $('ruleSess');
-  const note = $('ruleSessNote');
-  const extOpt = sel.querySelector('option[value="extended"]');
-  if (!sym) { note.textContent = 'Add a symbol to the watchlist first.'; return; }
-
-  const mkt = marketForSymbol(sym, state.quotes[sym]);
-  if (mkt !== 'US_EQUITY') {
-    extOpt.disabled = true;
-    if (sel.value === 'extended') sel.value = 'any';
-    note.textContent = mkt === 'CRYPTO'
-      ? `${sym} trades continuously — there is no pre- or post-market session to scope to.`
-      : `${sym} is an FX pair — one continuous session from Sunday 17:00 to Friday 17:00 ET, so extended hours do not apply.`;
-    return;
+/* ---- command palette + shortcuts ------------------------------------------------ */
+let palette = null;
+function paletteCommands() {
+  const C = [];
+  const add = (group, label, run, extra = {}) => C.push({ group, label, run, ...extra });
+  const lv = levelNow();
+  // Watchlist first: the most common thing to jump to.
+  for (const sym of sortedWatchlist()) {
+    const p = store.profiles[sym];
+    add('Watchlist', sym + (p && p.name ? ' — ' + p.name : ''), () => goSymbol(sym), { keywords: 'go symbol' });
   }
+  const tabs = safe(() => workspace.tabs(), []) || [];
+  tabs.forEach((t, i) => add('Tabs', i18nT('Switch to tab') + ': ' + i18nT(t.name), () => workspace.setActiveTab(t.id), { hint: i < 9 ? String(i + 1) : '' }));
+  add('Open', i18nT('Alert rules'), () => openAlerts(state.selection || store.watchlist[0] || ''), { hint: 'A' });
+  add('Open', i18nT('Transactions'), () => ledgerUI && ledgerUI.open(), { hint: 'T' });
+  add('Open', i18nT('Add a transaction'), () => ledgerUI && ledgerUI.openTxn(null), { keywords: 'buy sell dividend holding' });
+  add('Open', i18nT('Import a broker CSV'), () => ledgerUI && ledgerUI.openImport(), { keywords: 'csv import broker' });
+  add('Open', i18nT('Settings'), () => openSettings(), { hint: ',' });
+  add('Open', i18nT('Data providers and API usage'), () => openSettings('dataSection'), { keywords: 'quota limits keys provider' });
+  add('Open', i18nT('Detached displays'), () => openSettings('displaysSection'), { keywords: 'popout window monitor' });
+  add('Learn', i18nT('Lessons'), () => openLessons(), { hint: 'L' });
+  add('Learn', i18nT('Glossary'), () => openGlossary(), { hint: 'G' });
+  add('Learn', i18nT('Take the guided tour'), () => startAppTour());
+  add('Learn', i18nT('Keyboard shortcuts'), () => palette && palette.openShortcuts(), { hint: '?' });
+  add('Actions', i18nT(store.settings.privacy ? 'Show amounts' : 'Blur amounts (privacy)'), () => { setPrivacy(!store.settings.privacy); publishState(); }, { hint: 'P' });
+  add('Actions', i18nT(scheduler && scheduler.isPaused() ? 'Resume auto-refresh' : 'Pause auto-refresh'), () => $('btnPause').click(), { hint: '⇧P' });
+  add('Actions', i18nT('Refresh quotes now'), () => scheduler && scheduler.now(), { hint: 'R' });
+  add('Actions', i18nT('Add a symbol to the watchlist'), () => $('btnAdd').click());
+  add('Actions', i18nT('Export my data'), () => doExport(), { keywords: 'backup json' });
+  for (const id of LEVEL_ORDER) {
+    if (id !== lv) add('Level', i18nF('Switch to {level} level', { level: i18nT(LEVELS[id].label) }), () => setLevel(id), { keywords: 'experience beginner standard pro' });
+  }
+  for (const id of LEVEL_ORDER) {
+    add('Level', i18nF('Reset layout to the {level} template', { level: i18nT(LEVELS[id].label) }), () => {
+      if (confirm(i18nT('Discard your tabs and widgets and restore the default workspace?'))) safe(() => workspace.reset(id));
+    }, { keywords: 'layout template workspace' });
+  }
+  for (const w of WIDGETS) {
+    if (!w || !w.id) continue;
+    add('Add widget', i18nT('Add widget') + ': ' + i18nT(w.label || w.id), () => workspace.addWidget(w.id), { keywords: i18nT(w.desc || ''), searchOnly: true });
+  }
+  // Glossary terms are searchable but not listed until something is typed.
+  const g = glossaryForPalette;
+  if (g) for (const t of Object.values(g)) add('Glossary', i18nT('Explain') + ': ' + t.term, () => openGlossary(t.id), { keywords: t.termEn + ' ' + t.id, searchOnly: true });
+  return C;
+}
+let glossaryForPalette = null;
 
-  const pid = safe(() => market.routeQuote(sym), 'demo') || 'demo';
-  const ext = EXT_HOURS[pid];
-  const label = PROVIDER_LABELS[pid] || pid;
-  extOpt.disabled = ext === false;
-  if (ext === false && sel.value === 'extended') sel.value = 'regular';
-  note.textContent = ext === false
-    ? `${label} reports regular-session prices only, so an extended-hours rule on ${sym} could never fire. Change provider to scope one.`
-    : ext === null
-      ? `${label} does not document whether its free quote endpoint includes pre- and post-market trades, so an extended-hours rule may never fire.`
-      : `${label} reports extended-hours trades for ${sym}. Rules are still only checked while a tab is open.`;
+function goSymbol(sym) {
+  const s = normalizeSymbol(sym);
+  if (!s) return;
+  selectSymbol(s);
+  openDrawer(s);
 }
 
-function addRuleFromForm() {
-  const symbol = $('ruleSym').value; const value = parseFloat($('ruleVal').value);
-  if (!symbol || !Number.isFinite(value)) { toast('Enter a valid threshold.', 'err'); return; }
-  const scope = SESSION_SCOPES[$('ruleSess').value] ? $('ruleSess').value : 'regular';
-  store.addRule({
-    id: 'r' + Date.now() + Math.floor(Math.random() * 1e4),
-    symbol, type: $('ruleType').value, op: $('ruleOp').value, value, armed: true,
-    sessions: SESSION_SCOPES[scope].slice(),
+function wirePalette() {
+  palette = initPalette({
+    commands: () => paletteCommands(),
+    goSymbol,
+    searchSymbols: (q) => market.search(q),
+    actions: {
+      search: () => {
+        if (safe(() => matchMedia('(max-width: 900px)').matches, false)) setRailOpen(true);
+        $('railSearch').focus();
+      },
+      alerts: () => openAlerts(state.selection || store.watchlist[0] || ''),
+      ledger: () => ledgerUI && ledgerUI.open(),
+      lessons: () => openLessons(),
+      glossary: () => openGlossary(),
+      settings: () => openSettings(),
+      details: () => { const s = state.selection || store.watchlist[0]; if (s) openDrawer(s); },
+      tab: (e) => { const t = (safe(() => workspace.tabs(), []) || [])[Number(e.key) - 1]; if (t) workspace.setActiveTab(t.id); },
+      widget: () => safe(() => workspace.openPicker()),
+      privacy: () => { setPrivacy(!store.settings.privacy); publishState(); },
+      refresh: () => { if (scheduler) { scheduler.now(); toast(i18nT('Refreshing quotes…')); } },
+      pause: () => $('btnPause').click(),
+    },
   });
-  $('ruleVal').value = '';
-  renderRuleList(); refreshWidgets();
+  const b = $('btnPalette');
+  if (b) b.addEventListener('click', () => palette.open());
+  const k = $('btnKeys');
+  if (k) k.addEventListener('click', () => palette.openShortcuts());
 }
 
-// Legacy rules carry no `sessions`, and they were written when every session
-// counted — reporting them as 'Any session' keeps that promise visible.
-function scopeOf(rule) {
-  const s = rule && rule.sessions;
-  if (!Array.isArray(s) || !s.length) return 'any';
-  return s.length === 1 && s[0] === 'open' ? 'regular' : 'extended';
-}
+/* ---- data & providers panel ------------------------------------------------------
+   What each provider can supply, how fresh it is, how much of its free tier this
+   browser has used, and the last thing that went wrong — in one table, because
+   "why is this number old?" is the question a monitoring tool must answer. */
+const PROVIDER_CAPS = {
+  finnhub: { quotes: true, candles: false, fundamentals: true, news: true, events: true,
+    quality: 'Near real-time US stock quotes on the free plan. No historical candles on the free plan, so charts route to another provider.' },
+  twelvedata: { quotes: true, candles: true, fundamentals: true, news: false, events: false,
+    quality: 'Real-time for US equities where licensed, otherwise delayed. Also covers FX and crypto. Each symbol in a batch costs one credit.' },
+  polygon: { quotes: true, candles: true, fundamentals: true, news: true, events: true,
+    quality: 'Free plan: delayed and end-of-day data, 5 calls a minute. No 52-week figures or beta.' },
+  alpaca: { quotes: true, candles: true, fundamentals: false, news: true, events: false,
+    quality: 'Free feed is the IEX exchange only — about 2% of US volume — so prices can differ from the consolidated tape.' },
+  alphavantage: { quotes: true, candles: true, fundamentals: true, news: true, events: true,
+    quality: 'Mostly end-of-day on the free plan, and only 25 calls a day: best for fundamentals and history, not live watching.' },
+  coingecko: { quotes: true, candles: true, fundamentals: true, news: false, events: false,
+    quality: 'Crypto only, no key needed. Prices refresh every one to two minutes; history is limited to 365 days.' },
+  demo: { quotes: true, candles: true, fundamentals: true, news: true, events: true,
+    quality: 'Synthetic sample data bundled with the app. Never real prices — for trying the tool only.' },
+};
+const ERR_LABEL = {
+  authError: 'Key rejected', rateLimited: 'Rate limited', network: 'Unreachable', timeout: 'Timed out',
+  premium: 'Needs a paid plan', notCached: 'Not cached', error: 'Error',
+};
 
-function renderRuleList() {
-  const list = $('ruleList'); list.textContent = '';
-  if (!store.rules.length) { list.appendChild(el('p', 'field-note', i18nT('No alert rules yet.'))); return; }
-  for (const r of store.rules) {
-    const row = el('div', 'rule-row');
-    const sw = el('button', 'switch' + (r.armed ? ' on' : '')); sw.title = 'Arm/disarm';
-    sw.addEventListener('click', () => { store.updateRule(r.id, { armed: !r.armed }); renderRuleList(); refreshWidgets(); });
-    row.appendChild(sw);
-    row.append(el('span', 'rr-sym', r.symbol));
-    row.append(el('span', 'rule-cond', `${r.type === 'pct' ? 'Δ%' : 'price'} ${r.op === 'above' ? '≥' : '≤'} ${r.value}${r.type === 'pct' ? '%' : ''}`));
-    const scope = scopeOf(r);
-    const chip = el('span', 'tag scope ' + scope, SCOPE_LABEL[scope]);
-    chip.title = scope === 'regular' ? 'Only while regular hours are open.'
-      : scope === 'extended' ? 'Pre-market, regular hours and after hours.'
-        : 'Every session, including while the market is closed.';
-    row.appendChild(chip);
-    const del = el('button', 'icon-mini', '✕'); del.addEventListener('click', () => { store.removeRule(r.id); renderRuleList(); refreshWidgets(); });
-    row.appendChild(del);
-    list.appendChild(row);
-  }
-}
-
-/* The log records what was true when a rule fired: session, price and change at
-   that instant. It deliberately does NOT record what the price did afterwards —
-   a "you should have acted" column would turn a monitoring tool into a scorecard
-   for decisions this app does not make. */
-function renderAlertLog() {
-  const log = $('alertLog'); log.textContent = '';
-  const all = Array.isArray(store.alertlog) ? store.alertlog : [];
-
-  const filter = $('logFilter');
-  const syms = [...new Set(all.map((a) => a.symbol).filter(Boolean))].sort();
-  const prev = state.logFilter;
-  filter.textContent = '';
-  const opt = el('option', null, 'All symbols'); opt.value = ''; filter.appendChild(opt);
-  for (const s of syms) { const o = el('option', null, s); o.value = s; filter.appendChild(o); }
-  filter.value = syms.includes(prev) ? prev : '';
-  state.logFilter = filter.value;
-
-  const rows = all.filter((a) => !state.logFilter || a.symbol === state.logFilter).slice(-12).reverse();
-  if (!rows.length) {
-    log.appendChild(el('p', 'field-note', all.length ? 'Nothing logged for that symbol.' : 'Nothing has triggered yet.'));
-    return;
-  }
-  for (const a of rows) {
-    const r = el('div', 'log-row');
-    r.append(el('span', 'log-time', fmtTime(a.ts)));
-    if (a.sessionLabel || a.session) {
-      const st = el('span', 'tag sess' + (a.approx ? ' approx' : ''), a.sessionLabel || a.session);
-      st.title = a.approx
-        ? 'Market session when the rule fired — the calendar could not confirm this date.'
-        : 'Market session when the rule fired.';
-      r.append(st);
+function renderProviderPanel() {
+  const host = $('provTable');
+  if (!host) return;
+  const rows = safe(() => market.limits(), []) || [];
+  const pro = levelAllows(levelNow(), 'providerDiagnostics');
+  host.textContent = '';
+  const tbl = el('table', 'prov-tbl');
+  const cap = el('caption', 'sr-only', i18nT('Data providers: what each one supplies and how much of its free tier is used'));
+  const head = el('tr');
+  for (const h of ['Provider', 'Status', 'Supplies', 'This minute', 'Today']) { const th = el('th', null, i18nT(h)); th.scope = 'col'; head.append(th); }
+  const thead = el('thead'); thead.append(head);
+  const tbody = el('tbody');
+  const meter = (used, max) => {
+    const box = el('div', 'prov-meter');
+    if (!max) { box.append(el('span', 'prov-n', used ? String(used) : '—')); return box; }
+    const pct = Math.min(100, (used / max) * 100);
+    const bar = el('div', 'progress'); const fill = el('div', 'progress-bar' + (pct >= 80 ? ' hot' : ''));
+    fill.style.width = pct.toFixed(0) + '%'; bar.append(fill);
+    bar.setAttribute('role', 'meter'); bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', String(max)); bar.setAttribute('aria-valuenow', String(used));
+    box.append(bar, el('span', 'prov-n', used + ' / ' + max));
+    return box;
+  };
+  for (const r of rows) {
+    const caps = PROVIDER_CAPS[r.id] || {};
+    const tr = el('tr');
+    const name = el('th', 'prov-name'); name.scope = 'row';
+    name.append(el('strong', null, PROVIDER_LABELS[r.id] || r.label || r.id));
+    if (caps.quality) name.append(el('span', 'prov-q', i18nT(caps.quality)));
+    if (r.note) name.append(el('span', 'prov-q', i18nT('Free tier') + ': ' + i18nT(r.note)));
+    const err = r.lastError;
+    let status, cls;
+    if (err) { status = i18nT(ERR_LABEL[err.kind] || 'Error') + ' · ' + fmtTime(err.at); cls = err.kind === 'authError' ? 'bad' : 'warn'; }
+    else if (r.needsKey && !r.available) { status = i18nT('No key'); cls = 'off'; }
+    else if (r.usedHour || r.usedDay) { status = i18nT('OK'); cls = 'ok'; }
+    else { status = r.id === 'demo' ? i18nT('Built in') : i18nT('Ready'); cls = 'idle'; }
+    const st = el('td'); st.append(el('span', 'prov-st ' + cls, status));
+    if (pro && err && err.message) st.append(el('code', 'prov-raw', err.message));
+    if (pro && r.queued) st.append(el('span', 'prov-q', r.queued + ' ' + i18nT('queued')));
+    if (pro && r.cooldownUntil > Date.now()) st.append(el('span', 'prov-q', i18nT('cooling down') + ' ' + Math.ceil((r.cooldownUntil - Date.now()) / 1000) + 's'));
+    const sup = el('td', 'prov-caps');
+    for (const [k, lbl] of [['quotes', 'Quotes'], ['candles', 'Charts'], ['fundamentals', 'Fundamentals'], ['news', 'News'], ['events', 'Events']]) {
+      sup.append(el('span', 'prov-cap' + (caps[k] ? ' on' : ''), (caps[k] ? '✓ ' : '✕ ') + i18nT(lbl)));
     }
-    r.append(el('span', 'log-text', a.text));
-    if (a.quote && a.quote.price != null) {
-      // The logged symbol decides the prefix, not the live watchlist: an FX entry
-      // must still read '1.0848 USD' months after the pair left the board.
-      const snap = el('span', 'log-snap amount', fmtPrice(a.quote.price, a.quote.currency, fxOpts(a.symbol))
-        + (a.quote.changePct != null ? ' (' + fmtNum(a.quote.changePct) + '%)' : ''));
-      snap.title = 'Quote at the moment the rule fired' + (a.quote.source ? ' · ' + a.quote.source : '');
-      r.append(snap);
-    }
-    log.appendChild(r);
+    const m1 = el('td'); m1.append(meter(r.usedMin || 0, r.perMin));
+    const m2 = el('td'); m2.append(meter(r.usedDay || 0, r.perDay));
+    tr.append(name, st, sup, m1, m2);
+    tbody.append(tr);
   }
+  tbl.append(cap, thead, tbody);
+  const wrap = el('div', 'prov-wrap'); wrap.append(tbl);
+  host.append(wrap);
+}
+let provTimer = 0;
+function startProviderPanel() {
+  renderProviderPanel();
+  clearInterval(provTimer);
+  // Live while Settings is open, so a burst of calls is visible as it happens.
+  provTimer = setInterval(() => { if ($('settingsModal').hidden || $('modalScrim').hidden) { clearInterval(provTimer); return; } renderProviderPanel(); }, 2000);
 }
 
-function exportAlertLog() {
-  const rows = [['time', 'symbol', 'session', 'session_approx', 'scope', 'text', 'price', 'currency', 'change', 'change_pct', 'source']];
-  for (const a of store.alertlog) {
-    const q = a.quote || {};
-    rows.push([new Date(a.ts).toISOString(), a.symbol || '', a.sessionLabel || a.session || '', a.approx ? 'yes' : '',
-      a.scope || '', a.text || '', q.price ?? '', q.currency || '', q.change ?? '', q.changePct ?? '', q.source || '']);
-  }
-  downloadFile('carino-stocks-alerts-' + Math.floor(Date.now() / 1000) + '.csv', 'text/csv', rows.map((r) => r.map(csvCell).join(',')).join('\r\n'));
-}
-function csvCell(v) {
-  let s = String(v == null ? '' : v);
-  // Spreadsheets execute a leading =, +, - or @; only a plain number is safe as-is.
-  if (/^[=+\-@]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = '\'' + s;
-  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-
-/* ---- holding editor ------------------------------------------------------- */
-let editingHolding = null;
-function openHolding(h) {
-  editingHolding = h;
-  openModal('holdingModal', () => {
-    // Keep the captured static key in step, or applyStaticI18n relabels the
-    // dialog 'Add holding' on the next language switch. (Fleet pattern: Quote.)
-    $('holdingTitle').dataset.i18nKey = h ? 'Edit holding' : 'Add holding';
-    $('holdingTitle').textContent = i18nT(h ? 'Edit holding' : 'Add holding');
-    $('holdSym').value = h ? h.symbol : ''; $('holdShares').value = h ? h.shares : '';
-    $('holdCost').value = h ? h.cost : ''; $('holdMode').value = h ? h.costMode : 'per';
-    $('holdNote').value = h ? (h.note || '') : '';
-    $('holdDelete').hidden = !h;
-  });
-}
-function saveHolding() {
-  const symbol = normalizeSymbol($('holdSym').value);
-  const shares = parseFloat($('holdShares').value); const cost = parseFloat($('holdCost').value);
-  if (!symbol || !Number.isFinite(shares)) { toast('Symbol and shares are required.', 'err'); return; }
-  const rec = { symbol, shares, cost: Number.isFinite(cost) ? cost : 0, costMode: $('holdMode').value, note: $('holdNote').value.trim() };
-  if (editingHolding) { Object.assign(editingHolding, rec); }
-  else { rec.id = 'h' + Date.now() + Math.floor(Math.random() * 1e4); store.holdings.push(rec); }
-  store.saveHoldings();
-  // Back to the list rather than to no modal at all: an edit is usually one of
-  // several, and closing outright hides whether the change landed.
-  refreshAll(); openHoldings();
-}
-function deleteHolding() {
-  if (editingHolding) { store.holdings = store.holdings.filter((x) => x.id !== editingHolding.id); store.saveHoldings(); }
-  refreshAll(); openHoldings();
-}
+/* ---- alerts modal ----------------------------------------------------------
+   Built from the ALERT_TYPES registry in alerts-ui.js. openAlerts(sym, prefill)
+   keeps its signature: prefill {type, op, value} comes from a chart's "Alert at
+   this price" and from the calculator's stop and target buttons. */
+function openAlerts(sym, prefill) { if (alertsUI) alertsUI.open(sym, prefill); }
+function renderRuleList() { if (alertsUI) alertsUI.renderRules(); }
+function renderAlertLog() { if (alertsUI) alertsUI.renderLog(); }
 
 /* ---- alert delivery ------------------------------------------------------- */
 function fireAlert(rule, text, q, meta) {
@@ -1592,10 +2179,10 @@ function toast(msg, kind) {
 function updateModeChip() {
   const chip = $('modeChip');
   if (!chip) return;
-  if (state.fetchError) { chip.textContent = 'ERROR'; chip.classList.remove('live'); chip.title = state.fetchError; return; }
+  if (state.fetchError) { chip.textContent = i18nT('ERROR'); chip.classList.remove('live'); chip.title = state.fetchError; return; }
   const m = market.modeLabel();
   chip.textContent = m.text; chip.classList.toggle('live', m.live);
-  chip.title = 'Data source' + (leaderless ? ' · refreshing independently: no window holds the shared lock' : '');
+  chip.title = i18nT('Data source') + (leaderless ? ' · ' + i18nT('refreshing independently: no window holds the shared lock') : '');
 }
 /* i18n.js re-applies the static markup, the attribute table and the three
    boot-filled ids, but everything this file and the widgets build from JS keeps
@@ -1607,17 +2194,20 @@ function wireLangSwitch() {
   window.addEventListener('carino:langchange', () => {
     safe(() => workspace.relabel());
     renderRail();
-    renderRuleList();
+    safe(() => alertsUI && alertsUI.relabel());
     updateModeChip();
     renderMarketStrip();
     renderSession();
-    if (!$('holdingsModal').hidden) renderHoldings();
+    paintLevelChrome();
+    if (!$('settingsModal').hidden) renderProviderPanel();
+    if (drawerSym) renderDrawer();
+    if (ledgerUI && ledgerUI.isOpen()) ledgerUI.render();
   });
 }
 
 function refreshAll() {
-  renderRail(); refreshWidgets(); updateModeChip(); renderMarketStrip(); renderSession();
-  if (!$('holdingsModal').hidden) renderHoldings();
+  renderRail(); refreshWidgets(); updateModeChip(); renderMarketStrip(); renderSession(); refreshDrawer();
+  if (ledgerUI && ledgerUI.isOpen()) ledgerUI.render();
   publishState();
   scheduler && scheduler.now();
 }

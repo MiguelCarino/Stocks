@@ -1,0 +1,6 @@
+Date,Type,Details,Amount,Units,Realized Equity Change,Realized Equity,Balance,Position ID,Asset type,NWA
+02/01/2024 10:00:00,Deposit,USD,1000.00,-,1000.00,1000.00,1000.00,-,-,0.00
+16/01/2024 15:30:12,Open Position,AAPL/USD,500.00,2.702703,0.00,1000.00,500.00,2512345678,Stocks,0.00
+15/02/2024 12:00:00,Dividend,AAPL/USD,0.55,-,0.55,1000.55,500.55,2512345678,Stocks,0.00
+01/03/2024 16:00:00,Position closed,AAPL/USD,486.49,2.702703,-13.51,987.04,987.04,2512345678,Stocks,0.00
+05/03/2024 09:00:00,Withdraw Fee,-,5.00,-,-5.00,982.04,982.04,-,-,0.00

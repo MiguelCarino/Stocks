@@ -1,0 +1,20 @@
+Statement,Header,Field Name,Field Value
+Statement,Data,Title,Activity Statement
+Trades,Header,DataDiscriminator,Asset Category,Currency,Symbol,Date/Time,Quantity,T. Price,C. Price,Proceeds,Comm/Fee,Basis,Realized P/L,MTM P/L,Code
+Trades,Data,Order,Stocks,USD,AAPL,"2024-01-16, 10:30:00",10,185.5,186,-1855,-1,1856,0,5,O
+Trades,Data,Order,Stocks,USD,AAPL,"2024-03-01, 11:00:00",-4,180,180,720,-1,-742.4,-23.4,0,C
+Trades,SubTotal,,Stocks,USD,AAPL,,6,,,-1135,-2,,,,
+Trades,Data,Order,Forex,USD,EUR.USD,"2024-03-02, 09:00:00","1,000",1.08,1.08,-1080,-2,,,,
+Dividends,Header,Currency,Date,Description,Amount
+Dividends,Data,USD,2024-02-15,AAPL(US0378331005) Cash Dividend USD 0.24 per Share (Ordinary Dividend),2.4
+Dividends,Data,Total,,,2.4
+Withholding Tax,Header,Currency,Date,Description,Amount,Code
+Withholding Tax,Data,USD,2024-02-15,AAPL(US0378331005) Cash Dividend USD 0.24 per Share - US Tax,-0.36,
+Deposits & Withdrawals,Header,Currency,Settle Date,Description,Amount
+Deposits & Withdrawals,Data,USD,2024-01-02,Electronic Fund Transfer,5000
+Fees,Header,Subtitle,Currency,Date,Description,Amount
+Fees,Data,Other Fees,USD,2024-02-03,Market data fee,-10
+Interest,Header,Currency,Date,Description,Amount
+Interest,Data,USD,2024-02-05,USD Credit Interest for Jan-2024,3.21
+Corporate Actions,Header,Asset Category,Currency,Report Date,Date/Time,Description,Quantity,Proceeds,Value,Realized P/L,Code
+Corporate Actions,Data,Stocks,USD,2024-06-10,"2024-06-07, 20:25:00",AAPL(US0378331005) Split 4 for 1 (AAPL APPLE INC US0378331005),18,0,0,0,

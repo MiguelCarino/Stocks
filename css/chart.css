@@ -1,0 +1,72 @@
+/* chart.css — js/chart.js. Loaded after css/stocks.css; every colour is an
+   existing fleet token except the six series colours below, which a chart with
+   several indicator lines and compare symbols cannot do without. Gold stays the
+   first series so a single-line chart still reads as Carino. chart.js reads
+   these from the chart root at draw time, so a page may override any of them. */
+.cc-root{
+  --chart-bg:var(--bg-card); --chart-grid:var(--border); --chart-axis:var(--text-muted); --chart-cross:var(--text-sec);
+  --chart-s1:var(--accent); --chart-s2:#60a5fa; --chart-s3:#c084fc; --chart-s4:#f472b6; --chart-s5:#2dd4bf; --chart-s6:#fb923c;
+  position:relative;width:100%;height:100%;min-height:160px;overflow:hidden;
+  background:var(--chart-bg);font-family:var(--mono);user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;}
+.cc-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;touch-action:pan-y;cursor:crosshair;outline:none;}
+.cc-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--accent-dim);}
+.cc-drawing .cc-canvas{touch-action:none;}
+
+/* legends: one per pane, top-left; pointer-events off so the crosshair keeps tracking under them */
+.cc-legends{position:absolute;inset:0;pointer-events:none;}
+.cc-legend{position:absolute;left:8px;display:flex;flex-direction:column;gap:1px;font-size:.66rem;line-height:1.45;
+  color:var(--text-sec);font-variant-numeric:tabular-nums;
+  text-shadow:0 0 3px var(--chart-bg),0 0 2px var(--chart-bg),0 0 1px var(--chart-bg);}
+.cc-lg-head{display:flex;align-items:baseline;gap:8px;}
+.cc-lg-sym{font-weight:700;font-size:.78rem;color:var(--text);letter-spacing:.02em;}
+.cc-lg-meta{color:var(--text-muted);font-size:.62rem;}
+.cc-lg-ohlc{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:4px;}
+.cc-lg-k{color:var(--text-muted);}
+.cc-lg-v{color:var(--text);margin-right:6px;}
+.cc-lg-chg{margin-right:8px;color:var(--text-muted);}
+.cc-lg-chg[data-dir="up"]{color:var(--ok);} .cc-lg-chg[data-dir="down"]{color:var(--err);}
+.cc-lg-row{display:flex;align-items:center;flex-wrap:wrap;column-gap:5px;}
+.cc-lg-name{color:var(--text-sec);margin-right:2px;}
+.cc-sw{display:inline-block;width:8px;height:2px;border-radius:1px;background:var(--accent);}
+.cc-lg-k[hidden],.cc-lg-v[hidden]{display:none;}
+
+/* narrow charts (phones, small widgets): the legend must not bury the candles.
+   Overlay rows flow inline and only their first value is kept. */
+.cc-narrow .cc-legend{font-size:.6rem;}
+.cc-narrow .cc-lg-meta{display:none;}
+.cc-narrow .cc-legend-main{flex-direction:row;flex-wrap:wrap;column-gap:8px;}
+.cc-narrow .cc-lg-head,.cc-narrow .cc-lg-ohlc{flex-basis:100%;}
+.cc-narrow .cc-lg-row .cc-lg-v ~ .cc-lg-v{display:none;}
+.cc-narrow .cc-lg-row .cc-lg-v{margin-right:0;}
+
+/* chips: top-right of the plot (chart.js sets `right` past the price axis) */
+.cc-chips{position:absolute;top:6px;right:60px;display:flex;gap:6px;pointer-events:auto;}
+.cc-chip{font-size:.56rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px;border-radius:4px;
+  border:1px solid var(--border-hi);color:var(--text-sec);background:var(--chart-bg);white-space:nowrap;cursor:default;}
+.cc-chip-demo{color:var(--warn);border-color:var(--accent-dim);background:var(--accent-faint);}
+.cc-chip-ha{color:var(--accent-hi);border-style:dashed;}
+
+/* loading / error / empty overlay */
+.cc-state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;padding:16px;
+  background:color-mix(in srgb,var(--chart-bg) 78%,transparent);color:var(--text-sec);font-size:.74rem;text-align:center;}
+.cc-state[hidden]{display:none;}
+.cc-state[data-state="error"]{color:var(--err);}
+.cc-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--border-hi);border-top-color:var(--accent);
+  animation:cc-spin .9s linear infinite;flex-shrink:0;}
+@keyframes cc-spin{to{transform:rotate(360deg);}}
+@media (prefers-reduced-motion:reduce){.cc-spinner{animation:none;border-top-color:var(--border-hi);border-color:var(--accent);}}
+
+/* context menu */
+.cc-menu{position:absolute;z-index:10;min-width:180px;padding:4px;background:var(--bg-elev);border:1px solid var(--border-hi);
+  border-radius:6px;box-shadow:0 12px 32px rgba(0,0,0,.45);display:flex;flex-direction:column;}
+.cc-menu[hidden]{display:none;}
+.cc-menu-item{all:unset;box-sizing:border-box;padding:7px 10px;border-radius:4px;font-family:var(--mono);font-size:.72rem;
+  color:var(--text);cursor:pointer;white-space:nowrap;}
+.cc-menu-item:hover,.cc-menu-item:focus-visible{background:var(--accent-faint);color:var(--accent);}
+
+.cc-text-edit{position:absolute;z-index:11;width:160px;height:22px;padding:0 6px;font-family:var(--mono);font-size:.74rem;
+  background:var(--bg-elev);color:var(--text);border:1px solid var(--accent);border-radius:4px;outline:none;}
+.cc-chip-stale,.cc-chip-partial{color:var(--warn);border-color:var(--accent-dim);}
+.cc-chip-note,.cc-chip-src,.cc-chip-feed{text-transform:none;letter-spacing:.02em;font-weight:600;}
+.cc-chip-feed{color:var(--warn);}

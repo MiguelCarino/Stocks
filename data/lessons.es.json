@@ -1,0 +1,141 @@
+{
+  "paths": [
+    {"id": "start", "title": "Empieza aquí", "summary": "Cinco lecciones cortas para tu primera sesión: qué significan los números, de dónde vienen y cómo recibir avisos.", "lessons": ["reading-quote", "data-delays", "candlesticks", "alerts-here", "diversification"]},
+    {"id": "charts", "title": "Leer gráficas", "summary": "Tendencias, volumen, impulso y los niveles que vigilan muchos operadores. Herramientas descriptivas, no predicciones.", "lessons": ["trends-ma", "volume", "rsi-momentum", "support-resistance"]},
+    {"id": "money", "title": "Dinero y riesgo", "summary": "Cuánto arriesgar, cómo repartirlo y qué costos se comen tus rendimientos.", "lessons": ["risk-sizing", "diversification", "fees-taxes"]},
+    {"id": "pro", "title": "Consejos pro", "summary": "Teclado, varias gráficas, filtros y alertas sobre indicadores para un uso más intenso.", "lessons": ["pro-tips"]}
+  ],
+  "lessons": [
+    {
+      "id": "reading-quote", "title": "Cómo leer una cotización", "level": "beginner", "minutes": 3,
+      "summary": "Último precio, cambio, cambio porcentual, volumen y rango: los cinco números que verás en todos lados.",
+      "learn": ["quote", "last-price", "prev-close", "pct-change", "volume", "day-range", "bid", "ask", "spread"],
+      "steps": [
+        {"title": "Encuentra un símbolo", "body": "Tu lista de seguimiento está en la barra izquierda. Cada renglón es un símbolo con su precio más reciente y el movimiento de hoy. Haz clic en un renglón para seleccionarlo; los widgets vinculados lo siguen.", "target": "#railList", "try": "Haz clic en cualquier símbolo de la lista."},
+        {"title": "Último precio y cambio", "body": "El número grande es el último precio operado. El cambio y el cambio porcentual se miden desde el cierre de la sesión regular anterior, no desde que abriste la app. Verde es arriba del cierre de ayer; rojo, abajo.", "try": "Compara dos símbolos por cambio porcentual en lugar de por precio."},
+        {"title": "Volumen y rango", "body": "El volumen cuenta las acciones operadas hoy; compáralo con el volumen promedio para saber si hoy hay mucha actividad. El rango del día muestra el mínimo y el máximo de hoy, y dónde queda el último precio dentro de él.", "try": "Busca un símbolo cuyo último precio esté cerca del máximo del día."},
+        {"title": "Compra, venta y spread", "body": "Si tu plan de datos los incluye, el bid es lo que ofrecen los compradores y el ask lo que piden los vendedores. La diferencia, el spread, es un costo que pagarías al operar. Spreads amplios suelen indicar poca operación.", "try": "Abre el widget de cotización de un símbolo y revisa si tu proveedor da compra/venta."}
+      ]
+    },
+    {
+      "id": "data-delays", "title": "Datos, retrasos y proveedores", "level": "beginner", "minutes": 3,
+      "summary": "De dónde vienen los precios, por qué pueden llegar tarde y cómo te lo indica esta app.",
+      "learn": ["data-provider", "delayed-data", "real-time-data", "stale-quote", "rate-limit", "api-key", "demo-data", "market-session"],
+      "steps": [
+        {"title": "Demo o en vivo", "body": "Esta etiqueta muestra de dónde vienen los datos. DEMO significa precios simulados para aprender: no son reales. Agrega una clave API gratuita en Configuración para pasar a un proveedor en vivo.", "target": "#modeChip", "try": "Pasa el cursor sobre la etiqueta para ver la fuente actual."},
+        {"title": "El retraso es normal", "body": "Muchos planes gratuitos entregan precios con 15 minutos de retraso, o de un solo centro de ejecución. Cada cotización tiene hora; si deja de avanzar con la sesión abierta, la app la marca como desactualizada en lugar de fingir que está en vivo.", "try": "Busca la hora de cotización en una tarjeta o en el widget de cotización."},
+        {"title": "Sesiones de mercado", "body": "La etiqueta de sesión calcula con el reloj de tu dispositivo si el mercado está en premercado, abierto, después del cierre o cerrado, usando un calendario local de feriados. Un borde punteado significa que el calendario no puede garantizar esa fecha.", "target": "#sessChip", "try": "Haz clic en la etiqueta de sesión para ver la próxima apertura o cierre."},
+        {"title": "Límites de la API", "body": "Las claves gratuitas permiten un número limitado de solicitudes por minuto o por día. El medidor de cuota muestra cuánto has usado. Vigilar menos símbolos, o actualizar con menos frecuencia, hace que la cuota rinda.", "target": "#quotaBox", "try": "Cambia el intervalo de actualización y observa el medidor."}
+      ]
+    },
+    {
+      "id": "candlesticks", "title": "Velas japonesas en dos minutos", "level": "beginner", "minutes": 2,
+      "summary": "Cómo una vela resume apertura, máximo, mínimo y cierre, y por qué importa la temporalidad.",
+      "learn": ["candlestick", "ohlc", "timeframe", "line-chart", "heikin-ashi", "gap"],
+      "steps": [
+        {"title": "Cuerpo y mechas", "body": "El cuerpo de la vela va de la apertura al cierre. Sus mechas delgadas llegan al máximo y al mínimo. Una vela verde (alcista) cerró arriba de donde abrió; una roja (bajista), abajo.", "target": "[data-kind=\"chart\"]", "try": "Pasa el cursor sobre una vela para leer su apertura, máximo, mínimo y cierre."},
+        {"title": "Una vela, un periodo", "body": "Cada vela cubre un intervalo: un minuto, una hora, un día. La misma acción puede verse tranquila en diario y agitada en 1 minuto. Elige primero el rango (1D, 1M, 1A) y luego el intervalo.", "try": "Cambia entre 1D y 1A y fíjate cómo cambia el tamaño de las velas."},
+        {"title": "Huecos", "body": "Cuando una vela abre lejos del cierre anterior, aparece un hueco (gap). Suelen venir de noticias publicadas con el mercado cerrado.", "try": "Encuentra un hueco en una gráfica diaria."},
+        {"title": "Vistas más simples", "body": "La gráfica de línea une los cierres y oculta las mechas, lo que reduce el ruido al empezar. Las velas Heikin-Ashi son promedios suavizados: útiles para ver tendencias, pero no son precios reales.", "try": "Cambia el tipo de gráfica a Línea y luego regresa a Velas."}
+      ]
+    },
+    {
+      "id": "alerts-here", "title": "Cómo funcionan las alertas aquí", "level": "beginner", "minutes": 3,
+      "summary": "Reglas que vigilan por ti. Avisan; nunca operan.",
+      "learn": ["price-alert", "crossover", "alert-repeat", "alert-confirmation", "trailing-stop", "portfolio-alert", "delayed-data"],
+      "steps": [
+        {"title": "Abre las reglas", "body": "Las alertas son reglas que corren en tu navegador cada vez que se actualizan los precios. Solo te avisan; nunca se compra ni se vende nada.", "target": "#btnAlerts", "try": "Abre el panel de alertas."},
+        {"title": "Arriba frente a cruza hacia arriba", "body": "'Arriba' es un estado: se cumple mientras el precio siga arriba del nivel. 'Cruza hacia arriba' es un evento: se dispara solo en el momento del cruce. Para la mayoría de los niveles de precio, lo que quieres es el cruce.", "try": "Crea una regla 'cruza hacia arriba' un poco arriba del precio actual de un símbolo."},
+        {"title": "Una vez o rearmar", "body": "'Una vez' se dispara una sola vez y se detiene. 'Rearmar' vuelve a dispararse cuando la condición se reinicia. La confirmación hace que la regla espere varias actualizaciones seguidas, lo que filtra picos breves.", "try": "Pon una regla en 'una vez' y agrega 2 ciclos de confirmación."},
+        {"title": "Más allá del precio", "body": "Las reglas pueden vigilar cambio porcentual, huecos, picos de volumen, máximos de 52 semanas, cruces de medias móviles, niveles de RSI, stops dinámicos y tu portafolio completo. Cada tipo tiene un '?' que explica qué mide.", "try": "Revisa los tipos de regla y abre la ayuda de uno que no conozcas."},
+        {"title": "Conoce los límites", "body": "Las reglas solo corren con esta página abierta, y son tan frescas como tus datos. Con datos retrasados, la alerta llega tarde.", "try": "Activa las notificaciones del navegador en Configuración si quieres alertas con la pestaña en segundo plano."}
+      ]
+    },
+    {
+      "id": "trends-ma", "title": "Tendencias y medias móviles", "level": "beginner", "minutes": 3,
+      "summary": "Ver la dirección entre el ruido, y por qué todo promedio va retrasado.",
+      "learn": ["trend", "moving-average", "sma", "ema", "golden-cross", "crossover", "price-ma-cross"],
+      "steps": [
+        {"title": "Máximos y mínimos más altos", "body": "Una tendencia alcista es una serie de máximos y mínimos cada vez más altos; una bajista, lo contrario. Hay tendencias en todas las temporalidades y pueden contradecirse.", "target": "[data-kind=\"chart\"]", "try": "En una gráfica diaria de 1A, decide si la acción va al alza, a la baja o de lado."},
+        {"title": "Agrega una media móvil", "body": "Una media móvil suaviza el precio. Las medias simples de 50 y 200 días son las más seguidas. Un precio arriba de una media de 200 días ascendente suele describirse como tendencia alcista de largo plazo.", "try": "Agrega SMA 50 y SMA 200 a la gráfica."},
+        {"title": "Cruces", "body": "Cuando la de 50 días cruza arriba de la de 200 se le llama cruce dorado; hacia abajo, cruce de la muerte. Ambos llegan tarde por diseño: los promedios describen el pasado.", "try": "Encuentra la última vez que se cruzaron las dos medias."},
+        {"title": "Conviértelo en alerta", "body": "En lugar de revisar gráficas a diario, una regla puede avisarte cuando el precio cruce una media móvil, o cuando se crucen dos medias.", "try": "Crea una alerta 'precio cruza SMA(200)' para un símbolo."}
+      ]
+    },
+    {
+      "id": "volume", "title": "Volumen: el esfuerzo detrás de un movimiento", "level": "beginner", "minutes": 2,
+      "summary": "Por qué el mismo movimiento pesa más con mucho volumen, y cómo detectar actividad inusual.",
+      "learn": ["volume", "avg-volume", "relative-volume", "volume-ma", "obv", "liquidity"],
+      "steps": [
+        {"title": "Barras de volumen", "body": "Las barras bajo el precio muestran cuántas acciones se operaron en cada periodo. Las verdes corresponden a velas alcistas y las rojas a velas bajistas.", "target": "[data-kind=\"chart\"]", "try": "Activa el panel de volumen y encuentra la barra más alta del último mes."},
+        {"title": "Normal frente a inusual", "body": "Una línea de volumen promedio muestra qué es normal. El volumen relativo (RVOL) divide el volumen de hoy entre el promedio: 3x significa tres veces la actividad usual.", "try": "Compara el volumen de hoy con el volumen promedio en el widget de cotización."},
+        {"title": "Temprano en el día", "body": "El volumen diario empieza en cero cada mañana, así que comparar contra un día completo hace que las mañanas se vean tranquilas. Tenlo en cuenta antes de sacar conclusiones de números bajos.", "try": "Crea una alerta de volumen relativo en 2x para un símbolo que sigas."}
+      ]
+    },
+    {
+      "id": "rsi-momentum", "title": "RSI e impulso", "level": "standard", "minutes": 3,
+      "summary": "Medir la velocidad de los movimientos, y por qué 'sobrecompra' no es señal de venta.",
+      "learn": ["rsi", "momentum", "overbought-oversold", "macd", "divergence", "stochastic"],
+      "steps": [
+        {"title": "Qué mide el RSI", "body": "El RSI compara el tamaño de las subidas recientes con el de las bajadas recientes en una escala de 0 a 100. Mide velocidad, no valor.", "target": "[data-kind=\"chart\"]", "try": "Agrega RSI (14) como panel debajo de la gráfica."},
+        {"title": "70 y 30", "body": "Lecturas arriba de 70 se llaman sobrecompra y abajo de 30 sobreventa. En tendencias fuertes el RSI puede quedarse arriba de 70 por semanas, así que estas etiquetas describen, no predicen.", "try": "Encuentra un periodo en que el RSI se mantuvo arriba de 70 mientras el precio seguía subiendo."},
+        {"title": "MACD", "body": "El MACD es la diferencia entre dos medias exponenciales, con una línea de señal. Sus cruces con la señal se leen como cambios de impulso; van retrasados, como todo promedio.", "try": "Agrega el MACD y compara sus cruces con la gráfica de precio."},
+        {"title": "Divergencia", "body": "Cuando el precio hace un nuevo máximo pero el RSI hace un máximo más bajo, el impulso no confirma el movimiento. Las divergencias pueden durar mucho, así que tómalas como contexto.", "try": "Busca una divergencia en una gráfica de 1A."}
+      ]
+    },
+    {
+      "id": "support-resistance", "title": "Soporte y resistencia", "level": "standard", "minutes": 3,
+      "summary": "Niveles donde el precio se ha detenido antes, y cómo marcarlos.",
+      "learn": ["support-resistance", "breakout", "52-week-high", "pivot-points", "fibonacci", "trendline"],
+      "steps": [
+        {"title": "Zonas, no líneas", "body": "El soporte es donde las caídas han tendido a detenerse; la resistencia, donde las subidas se han frenado. Máximos y mínimos previos, números redondos y el máximo de 52 semanas son ejemplos comunes.", "target": "[data-kind=\"chart\"]", "try": "Encuentra un precio donde la acción se dio la vuelta al menos dos veces."},
+        {"title": "Marca el nivel", "body": "Usa la herramienta de línea horizontal para marcar un nivel. Los dibujos se guardan por símbolo en este dispositivo.", "try": "Dibuja una línea horizontal en el nivel que encontraste."},
+        {"title": "Rompimientos", "body": "Un cierre que atraviesa una resistencia con mucho volumen se llama rompimiento. Muchos fallan y regresan, así que algunas personas esperan un cierre más allá del nivel.", "try": "Haz clic derecho (o mantén presionado) sobre la línea y elige 'Alerta en este precio'."}
+      ]
+    },
+    {
+      "id": "risk-sizing", "title": "Riesgo y tamaño de posición", "level": "standard", "minutes": 4,
+      "summary": "Decide cuánto puedes perder antes de pensar cuánto esperas ganar. Educativo, no asesoría.",
+      "learn": ["position-size", "stop-loss", "risk-reward", "r-multiple", "break-even", "leverage", "gap"],
+      "steps": [
+        {"title": "Empieza por la pérdida", "body": "Una regla educativa común es arriesgar solo una parte pequeña y fija de la cuenta en cada idea, como 1%. En una cuenta de 50,000 eso son 500.", "try": "Anota lo máximo que aceptarías perder en una sola posición."},
+        {"title": "La distancia al stop define el tamaño", "body": "Acciones = dinero en riesgo / (entrada - stop). Con entrada en 40 y stop en 37, el riesgo es 3 por acción, así que 500 de riesgo permiten unas 166 acciones.", "try": "Usa la calculadora de tamaño de posición con tus propios números."},
+        {"title": "Beneficio frente a riesgo", "body": "Si el objetivo es 46, el beneficio es 6 contra un riesgo de 3: relación 2:1. Con 2:1 quedarías tablas acertando una de cada tres veces, antes de costos.", "try": "Calcula el porcentaje de aciertos para quedar tablas con una relación de 1.5:1."},
+        {"title": "Lo que un stop no puede hacer", "body": "Los stops no protegen contra huecos: una acción puede abrir muy abajo de tu nivel. El apalancamiento lo empeora, porque las pérdidas pueden superar lo que pusiste.", "try": "Pon una alerta de stop dinámico en una posición para vigilar tu salida sin colocar una orden."}
+      ]
+    },
+    {
+      "id": "diversification", "title": "Diversificación y distribución", "level": "beginner", "minutes": 3,
+      "summary": "Repartir el riesgo para que un mal resultado no lo hunda todo.",
+      "learn": ["diversification", "allocation", "correlation", "etf", "drift", "rebalancing", "currency-risk"],
+      "steps": [
+        {"title": "No todos los huevos en una canasta", "body": "Una sola empresa puede perder la mitad de su valor con una mala noticia. Un fondo con cientos de empresas rara vez cae así por una sola. Diversificar reduce el riesgo propio de cada empresa, no el del mercado.", "target": "#btnHoldings", "try": "Abre tus posiciones y cuenta cuántas empresas distintas tienes en realidad."},
+        {"title": "Mira la mezcla", "body": "La distribución muestra tu dinero por tipo de activo, sector, país, moneda o cuenta. Varias ETF pueden tener las mismas empresas gigantes, así que revisa si se traslapan.", "try": "Agrupa tu portafolio por sector y por moneda."},
+        {"title": "Objetivos y desviación", "body": "Si fijas pesos objetivo, la desviación muestra cuánto se ha alejado cada posición de su objetivo al moverse los precios. La app solo muestra la desviación; qué hacer al respecto es decisión tuya.", "try": "Fija un peso objetivo para una posición y observa su desviación."}
+      ]
+    },
+    {
+      "id": "fees-taxes", "title": "Comisiones e impuestos: lo básico", "level": "beginner", "minutes": 3,
+      "summary": "Los costos que sí controlas, y por qué el registro importa a la hora de los impuestos. Solo informativo.",
+      "learn": ["fees", "spread", "expense-ratio", "cost-basis", "realized-pl", "fifo", "average-cost", "taxes", "overtrading"],
+      "steps": [
+        {"title": "Los costos son seguros", "body": "Comisiones, spreads, gastos de fondos y conversión de divisas reducen los rendimientos, y a diferencia de los rendimientos, están garantizados. Muchas operaciones pequeñas suman rápido.", "try": "Estima cuánto pagaste en comisiones el año pasado."},
+        {"title": "Registra cada movimiento", "body": "Compras, ventas, dividendos, comisiones y splits van en el registro. Con fechas y comisiones registradas, la app puede calcular costo, ganancias realizadas e ingresos.", "target": "#btnHoldings", "try": "Agrega una compra pasada con su fecha y comisión reales."},
+        {"title": "Métodos de lotes", "body": "PEPS vende primero las acciones más antiguas; el costo promedio usa un solo precio combinado. Dan ganancias realizadas distintas con las mismas operaciones. Las reglas fiscales de tu país deciden cuál aplica.", "try": "Cambia el método de costo en Configuración y compara la G/P realizada."},
+        {"title": "No es asesoría fiscal", "body": "Las cifras aquí son informativas. Las constancias oficiales de tu casa de bolsa y un profesional calificado son la autoridad sobre lo que debes.", "try": "Exporta el CSV de ganancias realizadas para guardarlo con tus registros."}
+      ]
+    },
+    {
+      "id": "pro-tips", "title": "Consejos pro", "level": "pro", "minutes": 4,
+      "summary": "Control con teclado, varias gráficas vinculadas, filtros y alertas sobre indicadores.",
+      "learn": ["screener", "macd-cross", "bollinger-break", "atr-move", "relative-strength", "rate-limit"],
+      "steps": [
+        {"title": "Teclado en las gráficas", "body": "Haz clic en una gráfica para enfocarla y usa + y - para acercar, las flechas para desplazarte, Inicio y Fin para saltar, y doble clic para restablecer la vista.", "target": "[data-kind=\"chart\"]", "try": "Acerca la vista a la semana pasada usando solo el teclado."},
+        {"title": "Varias gráficas", "body": "Agrega varios widgets de gráfica en una pestaña. Los vinculados siguen al símbolo seleccionado; desvincula uno para fijarlo, por ejemplo para tener SPY junto a la acción que estudias. Las cruces de cursor se pueden sincronizar entre gráficas.", "target": ".wk-add", "try": "Agrega una segunda gráfica, fíjala a un índice y compara."},
+        {"title": "Comparación y fuerza relativa", "body": "Superpón otro símbolo en porcentaje, o divide uno entre otro, para ver cuál ha liderado en el periodo.", "try": "Compara una acción con la ETF de su sector en 1A."},
+        {"title": "Filtros", "body": "Los filtros seleccionan tus símbolos por condiciones como distancia al máximo de 52 semanas, RSI o volumen relativo. Los predefinidos son puntos de partida para investigar, no recomendaciones.", "try": "Corre un filtro predefinido y guarda una copia modificada."},
+        {"title": "Alertas sobre indicadores", "body": "Las reglas pueden dispararse con cruces del MACD, rupturas de Bandas de Bollinger, movimientos mayores a k x ATR y cruces de medias móviles. Usan barras diarias y gastan más llamadas a la API; mantén la lista enfocada.", "target": "#btnAlerts", "try": "Crea una alerta de movimiento por ATR con k = 2 en un símbolo volátil."}
+      ]
+    }
+  ]
+}

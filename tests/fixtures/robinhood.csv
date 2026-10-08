@@ -1,0 +1,12 @@
+"Activity Date","Process Date","Settle Date","Instrument","Description","Trans Code","Quantity","Price","Amount"
+"1/16/2024","1/16/2024","1/18/2024","AAPL","Apple
+CUSIP: 037833100","Buy","2.5","$185.00","($462.50)"
+"2/15/2024","2/15/2024","2/15/2024","AAPL","Cash Div: R/D 2024-02-12 P/D 2024-02-15 - 2.5 shares at 0.24","CDIV","","","$0.60"
+"3/1/2024","3/1/2024","3/1/2024","","ACH Deposit","ACH","","","$1,000.00"
+"3/2/2024","3/2/2024","3/2/2024","","ACH Withdrawal","ACH","","","($200.00)"
+"3/5/2024","3/5/2024","3/7/2024","AAPL","Apple","Sell","1","$190.00","$190.00"
+"3/6/2024","3/6/2024","3/6/2024","AAPL","AAPL 3/15/2024 Call $200.00","BTO","1","$1.20","($120.00)"
+"3/7/2024","3/7/2024","3/7/2024","","Gold Subscription Fee","GOLD","","","($5.00)"
+"6/10/2024","6/10/2024","6/10/2024","AAPL","Apple Forward Split","SPL","4.5S","",""
+""
+"","","","","","","","","","The data provided is for informational purposes only. Please consult a professional tax service or personal tax advisor if you need instructions on how to calculate cost basis or questions regarding your specific tax situation."

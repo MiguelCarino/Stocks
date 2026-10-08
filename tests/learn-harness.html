@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Learn Harness</title>
+<link rel="stylesheet" href="../fonts/carino-fonts.css" />
+<link rel="stylesheet" href="../css/stocks.css" />
+<link rel="stylesheet" href="../css/workspace.css" />
+<link rel="stylesheet" href="../css/learn.css" />
+<style>
+  body{padding:12px 16px;gap:12px;}
+  h1{font-family:var(--display);font-size:1rem;}
+  .bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+  .mock{display:grid;grid-template-columns:200px 1fr;gap:12px;}
+  .mock-rail{border:1px solid var(--border);border-radius:8px;padding:10px;}
+  .mock-rail li{list-style:none;font-family:var(--mono);font-size:.76rem;padding:4px 0;color:var(--text-sec);}
+  .mock-chart{border:1px solid var(--border);border-radius:8px;height:220px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-family:var(--mono);font-size:.7rem;}
+  .kv{display:flex;flex-wrap:wrap;gap:16px;font-family:var(--mono);font-size:.72rem;color:var(--text-sec);}
+  .kv span{display:inline-flex;align-items:center;}
+  #embed{border:1px solid var(--border);border-radius:8px;height:420px;overflow:hidden;}
+  #lessonsEmbed{border:1px solid var(--border);border-radius:8px;padding:14px;}
+  #results{font-family:var(--mono);font-size:.66rem;white-space:pre-wrap;color:var(--text-sec);border:1px solid var(--border);border-radius:6px;padding:8px;}
+  @media (max-width:640px){ .mock{grid-template-columns:1fr;} }
+</style>
+<script>
+  // Minimal stand-in for carino-lang.js: same surface (current, set, event).
+  (function () {
+    var current = new URLSearchParams(location.search).get('lang') || 'en';
+    window.CarinoLang = {
+      get current() { return current; },
+      set: function (c) { current = c; document.documentElement.lang = c; window.dispatchEvent(new CustomEvent('carino:langchange', { detail: { lang: c } })); },
+    };
+    document.documentElement.lang = current;
+  })();
+</script>
+</head>
+<body>
+<h1>Learn layer harness <span style="color:var(--text-muted);font-size:.7rem">glossary · help icons · lessons · tour</span></h1>
+
+<div class="bar">
+  <span class="live-chip" id="modeChip">DEMO</span>
+  <button class="sess-chip" id="sessChip" data-state="open"><span class="sc-dot"></span><span>OPEN</span></button>
+  <button class="cs-btn" id="btnAlerts">🔔 Alerts</button>
+  <button class="cs-btn" id="btnHoldings">Holdings</button>
+  <button class="cs-btn" id="openGloss">Glossary</button>
+  <button class="cs-btn" id="openLessons">Lessons</button>
+  <button class="cs-btn" id="tour">Start tour</button>
+  <select class="cs-btn" id="lang"><option>en</option><option>es</option><option>pt-BR</option><option>ja</option></select>
+  <span id="levelHost"></span>
+</div>
+
+<div class="mock">
+  <div class="mock-rail"><ul id="railList"><li>AAPL 189.50</li><li>MSFT 410.20</li><li>SPY 520.10</li></ul>
+    <div id="quotaBox" class="learn-muted" style="margin-top:8px">Quota 12 / 60</div></div>
+  <div>
+    <div class="kv" id="kv">
+      <span data-learn="pe">P/E 28.4</span>
+      <span data-learn="dividend-yield">Yield 0.5%</span>
+      <span data-learn="trailStop" data-learn-kind="alerts">Trailing stop</span>
+      <span id="rsiLabel">RSI 61</span>
+      <span data-learn="does-not-exist">Unknown</span>
+    </div>
+    <div class="mock-chart" data-kind="chart" style="margin-top:10px">[chart widget]</div>
+  </div>
+</div>
+
+<div id="embed"></div>
+<div id="lessonsEmbed"></div>
+<pre id="results">running…</pre>
+
+<script type="module">
+  import * as L from '../js/learn.js';
+  window.L = L;
+  const $ = (id) => document.getElementById(id);
+  const out = [];
+  let fails = 0;
+  const ok = (cond, msg) => { out.push((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) fails++; };
+
+  // Progress lives in the store in the real app; here, in memory.
+  const seen = new Set(['reading-quote']);
+  L.configure({ seen: () => [...seen], onSeen: (id) => seen.add(id) });
+
+  L.decorate(document);
+  $('rsiLabel').appendChild(L.helpIcon('rsi', { kind: 'indicators' }));
+  $('levelHost').appendChild(L.levelPicker('beginner', (lv) => { window.lastLevel = lv; }));
+  window.gloss = L.mountGlossary($('embed'), { initial: 'xirr' });
+  window.lessons = L.mountLessons($('lessonsEmbed'));
+  $('openGloss').onclick = () => L.openGlossary('spread');
+  $('openLessons').onclick = () => L.openLessons();
+  $('tour').onclick = () => { window.tourApi = L.startTour([
+    { title: 'Welcome', body: 'A centred intro step with no target.' },
+    { target: '#modeChip', title: 'Data source', body: 'Demo or live.' },
+    { target: '#nope-missing', title: 'Missing', body: 'This step must be skipped.' },
+    { target: '#railList', title: 'Watchlist', body: 'Your symbols.', try: 'Click one.' },
+    { target: '[data-kind="chart"]', title: 'Chart', body: 'Candles live here.' },
+  ], { onEnd: (r) => { window.tourResult = r; } }); };
+  $('lang').onchange = (e) => window.CarinoLang.set(e.target.value);
+
+  // ---- data integrity: every LEARN_IDS target exists in every language ----
+  const files = ['glossary.json', 'glossary.es.json', 'glossary.pt-BR.json'];
+  const maps = await Promise.all(files.map((f) => fetch('../data/' + f).then((r) => r.json())));
+  const ids = new Set();
+  for (const k of Object.keys(L.LEARN_IDS)) for (const v of Object.values(L.LEARN_IDS[k])) ids.add(v);
+  files.forEach((f, n) => {
+    const missing = [...ids].filter((id) => !maps[n][id]);
+    ok(!missing.length, f + ': all ' + ids.size + ' LEARN_IDS targets present' + (missing.length ? ' — missing ' + missing.join(', ') : ''));
+    const badRel = [];
+    for (const [id, t] of Object.entries(maps[n])) for (const r of t.related || []) if (!maps[0][r]) badRel.push(id + '→' + r);
+    ok(!badRel.length, f + ': related ids resolve' + (badRel.length ? ' — ' + badRel.join(', ') : ''));
+    const long = Object.entries(maps[n]).filter(([, t]) => (t.short || '').length > 140).map(([id]) => id);
+    ok(!long.length, f + ': every short ≤ 140 chars' + (long.length ? ' — ' + long.join(', ') : ''));
+    ok(Object.keys(maps[n]).length === Object.keys(maps[0]).length, f + ': ' + Object.keys(maps[n]).length + ' terms (en ' + Object.keys(maps[0]).length + ')');
+  });
+  ok(Object.keys(maps[0]).length >= 90, 'glossary has ≥ 90 terms');
+  const need = ['sma','ema','wma','vwap','bb','keltner','donchian','ichimoku','psar','supertrend','rsi','macd','stoch','stochrsi','atr','adx','obv','mfi','cci','willr','roc','cmf','volma'];
+  ok(need.every((k) => L.LEARN_IDS.indicators[k]), 'every contract indicator id is mapped');
+  const alerts = ['price','pct','pctFromOpen','gap','volume','relVolume','high52Prox','low52Prox','newHigh52','newLow52','trailStop','smaCross','emaCross','maCross','rsi','macdCross','bbBreak','atrMove','portfolioValue','portfolioDayPL','portfolioDayPct'];
+  ok(alerts.every((k) => L.LEARN_IDS.alerts[k]), 'every contract alert type is mapped');
+  for (const lf of ['lessons.json', 'lessons.es.json', 'lessons.pt-BR.json']) {
+    const ls = await fetch('../data/' + lf).then((r) => r.json());
+    const lids = new Set(ls.lessons.map((l) => l.id));
+    const badRef = ls.paths.flatMap((p) => p.lessons.filter((id) => !lids.has(id)));
+    const badTerm = ls.lessons.flatMap((l) => (l.learn || []).filter((id) => !maps[0][id]).map((id) => l.id + ':' + id));
+    ok(!badRef.length && !badTerm.length && ls.lessons.length >= 11, lf + ': ' + ls.lessons.length + ' lessons, paths and terms resolve' + (badRef.concat(badTerm).length ? ' — ' + badRef.concat(badTerm).join(', ') : ''));
+  }
+
+  // ---- levels ----
+  ok(L.levelAllows('beginner', 'chart.type.candle') && !L.levelAllows('beginner', 'chart.drawings'), 'beginner: candles yes, drawings no');
+  ok(L.levelAllows('standard', 'chart.drawings') && !L.levelAllows('standard', 'commandPalette'), 'standard: drawings yes, command palette no');
+  ok(L.levelAllows('pro', 'providerDiagnostics') && L.levelAllows('pro', 'indicator.ichimoku'), 'pro: everything');
+  ok(!L.levelAllows('beginner', 'indicator.ichimoku') && L.levelAllows('beginner', 'indicator.rsi'), 'indicator gating');
+  ok(L.levelAllows('beginner', 'unknown.feature'), 'unknown features fail open');
+  ok(!L.levelAllows('beginner', 'pro') && L.levelAllows('pro', 'standard'), 'level-name features compare by rank');
+  ok(L.levelLimit('beginner', 'indicators') === 2, 'beginner indicator cap = 2');
+  ok(L.defaultLevel({}) === 'beginner' && L.defaultLevel({ hasWatchlist: true }) === 'standard', 'defaultLevel rule');
+  ok(L.learnIdFor('alerts', 'trailStop') === 'trailing-stop' && L.learnIdFor('x', 'rsi') === 'rsi', 'learnIdFor');
+
+  // ---- glossary load + fallback ----
+  const es = await L.loadGlossary('es');
+  ok(es.rsi && es.rsi.term.includes('RSI') && es.rsi.termEn.startsWith('RSI'), 'es glossary loads with English term kept');
+  const ja = await L.loadGlossary('ja');
+  ok(ja.rsi && ja.rsi.term === maps[0].rsi.term, 'ja falls back to English');
+  await L.loadGlossary();
+  ok(L.term('pe') && L.term('pe').short.length > 0, 'term() resolves synchronously after load');
+
+  document.getElementById('results').textContent = out.join('\n') + '\n\n' + (fails ? fails + ' FAILED' : 'ALL PASS');
+  document.getElementById('results').dataset.pass = fails ? 'false' : 'true';
+  window.harnessDone = true;
+</script>
+</body>
+</html>

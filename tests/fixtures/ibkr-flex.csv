@@ -1,0 +1,5 @@
+"ClientAccountID","CurrencyPrimary","AssetClass","Symbol","Description","TradeDate","Quantity","TradePrice","IBCommission","Buy/Sell","NetCash"
+"U1234567","USD","STK","AAPL","APPLE INC","20240116","10","185.5","-1","BUY","-1856"
+"U1234567","USD","STK","AAPL","APPLE INC","20240301","-4","180","-1.0004","SELL","718.9996"
+"U1234567","EUR","STK","ASML","ASML HOLDING","20240305","2","850","-3","BUY","-1703"
+"U1234567","USD","OPT","AAPL  240315C00200000","AAPL 15MAR24 200 C","20240306","1","1.2","-0.65","BUY","-120.65"

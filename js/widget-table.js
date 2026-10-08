@@ -20,6 +20,7 @@
 
 import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtCap, fmtTime, fmtAge } from './format.js';
 import { sessionAt, marketForSymbol } from './session.js';
+import { helpIcon } from './learn.js';
 
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 // Fleet i18n bridge — guarded so the module still works without the dictionary.
@@ -37,6 +38,14 @@ function safe(fn, fallback) {
    formatted string, so "1,180,000" does not sort below "9". `width` is applied
    through a <colgroup> rather than CSS: column widths are a property of the
    content this file chose to put in them, and the stylesheet cannot know them. */
+
+// Column → glossary entry, for the '?' beside a header. Shown below Pro, where
+// the header row is a lesson as much as a label.
+const HELP_FOR_COL = {
+  last: 'last-price', chg: 'change', chgpct: 'pct-change', open: 'open-price', high: 'day-range', low: 'day-range',
+  prevclose: 'prev-close', range: 'day-range', volume: 'volume', cap: 'market-cap', exchange: 'exchange',
+  session: 'market-session', source: 'data-provider',
+};
 
 const SESSION_RANK = { open: 0, pre: 1, post: 2, closed: 3, weekend: 4, holiday: 5 };
 
@@ -184,10 +193,10 @@ const COL_DEFS = [
        visual difference at all — only a tooltip nobody hovers. */
     patch: (td, r, refs) => {
       const b = r.basis;
-      setText(refs.t, b ? b.label : '—');
+      setText(refs.t, b ? i18nT(b.label) : '—');
       const cls = 'tag basis' + (b && b.kind === 'inferred' ? ' approx' : b && b.kind === 'none' ? ' unstated' : '');
       if (refs.t.className !== cls) refs.t.className = cls;
-      setAttr(td, 'title', b ? b.note : '');
+      setAttr(td, 'title', b ? i18nT(b.note) : '');
       td.classList.toggle('wt-warn', !!(b && b.kind !== 'stated'));
     },
   },
@@ -267,6 +276,7 @@ function createTable(host, ctx0) {
      `shown` is seeded rather than null so the first paint highlights the current
      selection without yanking the view to it: nobody asked for a jump on load. */
   let shown = ctx.selection;
+  const helpOn = () => ctx.level !== 'pro';
 
   const rows = new Map();      // sym -> { tr, cells: Map<colId, {td, refs}> }
   let symSig = null, colSig = null, orderSig = null;
@@ -310,7 +320,9 @@ function createTable(host, ctx0) {
   // dismiss-on-outside-click behaviour has to be wired up, and it is wired to
   // the document because that is where the clicks it cares about land.
   const onDocClick = (e) => { if (cols.box.open && !cols.box.contains(e.target)) cols.box.open = false; };
-  const onDocKey = (e) => { if (e.key === 'Escape' && cols.box.open) { cols.box.open = false; cols.sum.focus(); } };
+  // preventDefault marks the key as used, so the app's own Escape (close the
+  // drawer or a modal) leaves everything else alone.
+  const onDocKey = (e) => { if (e.key === 'Escape' && cols.box.open) { e.preventDefault(); cols.box.open = false; cols.sum.focus(); } };
 
   tbody.addEventListener('click', onBodyClick);
   thead.addEventListener('click', onHeadClick);
@@ -349,7 +361,7 @@ function createTable(host, ctx0) {
     colgroup.textContent = '';
     headRow.textContent = '';
     for (const col of list) {
-      const c = el('col');
+      const c = el('col', 'wt-col-' + col.id);
       c.style.width = col.width || '9ch';
       colgroup.appendChild(c);
 
@@ -357,12 +369,14 @@ function createTable(host, ctx0) {
       th.setAttribute('scope', 'col');
       th.dataset.col = col.id;
       const btn = el('button', 'wt-hbtn'); btn.type = 'button';
-      btn.title = col.desc || col.label;
-      btn.append(el('span', 'wt-hlbl', col.label));
+      btn.title = i18nT(col.desc || col.label);
+      btn.append(el('span', 'wt-hlbl', i18nT(col.label)));
       const arrow = el('span', 'wt-harrow');
       arrow.setAttribute('aria-hidden', 'true');
       btn.appendChild(arrow);
       th.appendChild(btn);
+      // The '?' sits beside the sort button, not inside it: one control, one job.
+      if (HELP_FOR_COL[col.id] && helpOn()) th.appendChild(helpIcon(HELP_FOR_COL[col.id]));
       headRow.appendChild(th);
     }
   }
@@ -372,7 +386,7 @@ function createTable(host, ctx0) {
     tbody.textContent = '';
     if (!data.length) {
       const tr = el('tr', 'wt-emptyrow');
-      const td = el('td', 'wt-emptycell', (window.CarinoI18n ? window.CarinoI18n.t('No symbols in this watchlist yet.') : 'No symbols in this watchlist yet.'));
+      const td = el('td', 'wt-emptycell', i18nT('No symbols in this watchlist yet.'));
       td.colSpan = list.length;
       tr.appendChild(td);
       tbody.appendChild(tr);
@@ -464,11 +478,11 @@ function createTable(host, ctx0) {
     root.classList.toggle('wt-privacy', !!ctx.privacy);
     root.classList.toggle('wg-privacy', !!ctx.privacy);
     root.classList.toggle('wt-stalef', ctx.staleMs > 0);
-    setText(count, data.length === 1 ? '1 symbol' : data.length + ' symbols');
+    setText(count, data.length === 1 ? i18nT('1 symbol') : data.length + ' ' + i18nT('symbols'));
     frame.hidden = !(ctx.staleMs > 0);
     if (ctx.staleMs > 0) {
-      setText(frame, 'Frame ' + fmtAge(ctx.staleMs) + ' old');
-      setAttr(frame, 'title', 'No refresh has completed for ' + fmtAge(ctx.staleMs) + '. Every figure below is that old.');
+      setText(frame, i18nT('Frame') + ' ' + fmtAge(ctx.staleMs) + ' ' + i18nT('old'));
+      setAttr(frame, 'title', i18nT('No refresh has completed for') + ' ' + fmtAge(ctx.staleMs) + '. ' + i18nT('Every figure below is that old.'));
     }
   }
 
@@ -611,8 +625,8 @@ function buildColMenu(set) {
       set(next);
     });
     boxes.set(col.id, cb);
-    row.append(cb, el('span', 'wt-collbl', col.label));
-    row.title = col.desc || col.label;
+    row.append(cb, el('span', 'wt-collbl', i18nT(col.label)));
+    row.title = i18nT(col.desc || col.label);
     list.appendChild(row);
   }
 
@@ -648,6 +662,7 @@ function normCtx(input) {
     uncovered: c.uncovered instanceof Set ? c.uncovered : new Set(),
     staleMs: Number(c.staleMs) || 0,
     privacy: !!c.privacy,
+    level: typeof c.level === 'string' ? c.level : 'standard',
     profileFor: fn(c.profileFor, () => null),
     marketFor: fn(c.marketFor, null),
     sessionFor: fn(c.sessionFor, null),
