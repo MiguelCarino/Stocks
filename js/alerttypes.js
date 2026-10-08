@@ -229,7 +229,9 @@ function num(v, dp) {
 function priceDp(v) { const a = Math.abs(v); return a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : 8; }
 const SIGN = (v) => (v >= 0 ? '+' : '−');
 export const FORMATTERS = {
-  price: (v) => num(v, priceDp(v || 0)),
+  // Trailing zeros past the cents go: a $96.44 threshold reads 96.44, not
+  // 96.4400, while an FX rate or a coin keeps the places it actually uses.
+  price: (v) => num(v, priceDp(v || 0)).replace(/(\.\d\d\d*?)0+$/, '$1'),
   pct: (v) => (fin(v) ? SIGN(v) + num(Math.abs(v), 2) + '%' : '—'),
   pctAbs: (v) => (fin(v) ? num(v, 2) + '%' : '—'),
   x: (v) => (fin(v) ? num(v, 2) + '×' : '—'),

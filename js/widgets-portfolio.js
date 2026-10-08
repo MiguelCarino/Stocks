@@ -19,7 +19,7 @@ import { computePortfolio, ledgerSymbols, ledgerAccounts, positionsCSV } from '.
 import { holdingsToTxns, allocation, drift, portfolioHistory, twrSeries, investorFlows, xirr, riskMetrics,
   maxDrawdown, annualize, dividendIncome, positionSize, riskReward, breakEven, recoveryGain, localToday, OTHER } from './portfolio.js';
 import { createChart } from './chart.js';
-import { fmtPrice, fmtPct, fmtNum, fmtAge, priceKind } from './format.js';
+import { fmtPrice, fmtPriceNum, fmtPct, fmtNum, fmtAge, priceKind } from './format.js';
 import { helpIcon, learnIdFor, levelAllows } from './learn.js';
 
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
@@ -446,10 +446,11 @@ function createPortfolio(host, ctx) {
       return;
     }
     setText(c.qty, Number.isInteger(p.qty) ? fmtNum(p.qty, 0) : String(+p.qty.toFixed(8)));
-    const lots = (p.lots || []).map((l) => l.date + '  ' + fmtNum(l.qty, 4) + ' @ ' + fmtNum(l.price, 4)).join('\n');
+    const pk = priceOpts(cur, p.symbol).kind;
+    const lots = (p.lots || []).map((l) => l.date + '  ' + fmtNum(l.qty, 4) + ' @ ' + fmtPriceNum(l.price, pk)).join('\n');
     c.qty.title = lots ? i18nT('Open lots') + ' (' + pf.method.toUpperCase() + ')\n' + lots : '';
     const ccySuffix = p.currency && p.currency !== pf.baseCurrency ? ' ' + p.currency : '';
-    setText(c.avg, fin(p.avgCost) ? fmtNum(p.avgCost, p.avgCost >= 100 ? 2 : 4) + ccySuffix : DASH);
+    setText(c.avg, fin(p.avgCost) ? fmtPriceNum(p.avgCost, pk) + ccySuffix : DASH);
     setText(c.last, uncov ? i18nT('Not covered') : fin(p.price) ? fmtPrice(p.price, q && q.currency ? q.currency : p.currency, priceOpts(cur, p.symbol)) : DASH);
     setText(c.unreal, money(p.unrealizedBase, { signed: true }) + (fin(p.unrealizedPct) ? ' (' + fmtPct(p.unrealizedPct) + ')' : ''));
     setCls(c.unreal, 'num amount ' + signCls(p.unrealizedBase));
@@ -1162,7 +1163,12 @@ function createCalculator(host, ctx) {
     out.appendChild(g);
   }
   function setWarn(list) { setHidden(warn, !list.length); setText(warn, list.map((w) => i18nT(w)).join(' ')); }
-  const n4 = (v) => (fin(v) ? fmtNum(v, Math.abs(v) >= 100 ? 2 : 4) : DASH);
+  // Prices at the linked symbol's precision; typed figures with no symbol keep
+  // what was typed (fmtPriceNum trims the zeros).
+  const n4 = (v) => {
+    const s = subjectOf(cur, pinned);
+    return fin(v) ? fmtPriceNum(v, s ? priceOpts(cur, s).kind : undefined) : DASH;
+  };
 
   function calc() {
     acts.textContent = '';

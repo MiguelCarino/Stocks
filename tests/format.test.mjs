@@ -29,3 +29,19 @@ test('priceKind maps session market ids', () => {
   assert.equal(priceKind('CRYPTO'), 'crypto');
   assert.equal(priceKind(null), undefined);
 });
+
+test('fmtPriceNum: cents for stocks, pips kept, zeros trimmed without a kind', async () => {
+  const { fmtPriceNum } = await import('../js/format.js');
+  assert.equal(fmtPriceNum(96.44, 'equity'), '96.44');
+  assert.equal(fmtPriceNum(96.44), '96.44');
+  assert.equal(fmtPriceNum(1.0848), '1.0848');
+  assert.equal(fmtPriceNum(1.0848, 'fx'), '1.0848');
+  assert.equal(fmtPriceNum(250.5), '250.50');
+});
+
+test('alert thresholds echo a $96.44 stock without padding', async () => {
+  const { FORMATTERS } = await import('../js/alerttypes.js');
+  assert.equal(FORMATTERS.price(96.44), '96.44');
+  assert.equal(FORMATTERS.price(1.0848), '1.0848');
+  assert.equal(FORMATTERS.price(190), '190.00');
+});

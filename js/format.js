@@ -81,6 +81,21 @@ export function fmtPct(v) {
   return (n >= 0 ? '+' : MINUS) + Math.abs(n).toFixed(2) + '%';
 }
 
+/* A bare price figure (no currency) — ledger rows, average cost, lot tooltips,
+   calculator results. With a kind it follows priceDecimals. Without one it keeps
+   the magnitude rule's places but drops trailing zeros past the cents, so a
+   typed 96.44 reads 96.44 while 1.0848 keeps its pips. */
+export function fmtPriceNum(v, kind) {
+  if (v == null) return DASH;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DASH;
+  const d = priceDecimals(n, kind);
+  if (kind || d <= 2) return group(n, d);
+  let s = group(n, d);
+  while (/\.\d{3,}$/.test(s) && s.endsWith('0')) s = s.slice(0, -1);
+  return s;
+}
+
 export function fmtNum(v, dp) {
   if (v == null) return DASH;
   const n = Number(v);

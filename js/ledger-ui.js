@@ -17,7 +17,15 @@ import { importCSV, parseCSV, mapRows, BROKER_PRESETS, dedupe, toCSV } from './c
 import { TXN_TYPES } from './store.js';
 import { csvCell } from './folio.js';
 import { localToday } from './portfolio.js';
-import { fmtNum } from './format.js';
+import { fmtNum, fmtPriceNum, priceKind } from './format.js';
+import { marketForSymbol } from './session.js';
+
+// A stock price in cents, an FX rate in pips: precision follows the symbol.
+const priceTxt = (v, sym) => {
+  let kind;
+  try { kind = sym ? priceKind(marketForSymbol(sym)) : undefined; } catch { kind = undefined; }
+  return fmtPriceNum(v, kind);
+};
 
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
 const $ = (id) => document.getElementById(id);
@@ -119,7 +127,7 @@ export function initLedgerUI(deps) {
       tr.appendChild(ty);
       tr.appendChild(el('td', 'sym', t.symbol || ''));
       tr.appendChild(el('td', 'num amount', fin(t.qty) ? String(+t.qty.toFixed(8)) : t.type === 'split' && fin(t.ratio) ? fmtNum(t.ratio, 4) + ':1' : ''));
-      tr.appendChild(el('td', 'num amount', fin(t.price) ? fmtNum(t.price, t.price >= 100 ? 2 : 4) : ''));
+      tr.appendChild(el('td', 'num amount', fin(t.price) ? priceTxt(t.price, t.symbol) : ''));
       tr.appendChild(el('td', 'num amount', fin(t.amount) ? fmtNum(t.amount, 2) : fin(t.qty) && fin(t.price) ? fmtNum(t.qty * t.price, 2) : ''));
       tr.appendChild(el('td', 'num amount', fin(t.fee) && t.fee ? fmtNum(t.fee, 2) : ''));
       tr.appendChild(el('td', '', t.currency || ''));
@@ -191,7 +199,7 @@ export function initLedgerUI(deps) {
   function describe(t) {
     const parts = [t.date, i18nT(TYPE_LABEL[t.type] || t.type), t.symbol || ''];
     if (fin(t.qty)) parts.push(fmtNum(t.qty, 4));
-    if (fin(t.price)) parts.push('@ ' + fmtNum(t.price, 4));
+    if (fin(t.price)) parts.push('@ ' + priceTxt(t.price, t.symbol));
     if (fin(t.amount)) parts.push(fmtNum(t.amount, 2) + ' ' + (t.currency || ''));
     return parts.filter(Boolean).join(' ');
   }
@@ -469,7 +477,7 @@ export function initLedgerUI(deps) {
       tr.appendChild(el('td', '', i18nT(TYPE_LABEL[t.type] || t.type) + (t.short ? ' (' + i18nT('short') + ')' : '')));
       tr.appendChild(el('td', 'sym', t.symbol || ''));
       tr.appendChild(el('td', 'num', fin(t.qty) ? String(+Math.abs(t.qty).toFixed(8)) : t.type === 'split' && t.ratio != null ? String(t.ratio) : ''));
-      tr.appendChild(el('td', 'num', fin(t.price) ? fmtNum(t.price, t.price >= 100 ? 2 : 4) : ''));
+      tr.appendChild(el('td', 'num', fin(t.price) ? priceTxt(t.price, t.symbol) : ''));
       tr.appendChild(el('td', 'num', fin(t.amount) ? fmtNum(t.amount, 2) : ''));
       tr.appendChild(el('td', 'num', fin(t.fee) && t.fee ? fmtNum(t.fee, 2) : ''));
       tr.appendChild(el('td', '', t.currency || ''));
