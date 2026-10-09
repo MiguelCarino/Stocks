@@ -35,7 +35,7 @@
 import { store, normalizeSymbol } from './store.js';
 import { WIDGETS, createWidget, widgetMeta } from './widgets.js';
 // One table of which popout panel hosts which widget kind, owned by displays.js.
-import { panelForWidget } from './displays.js';
+import { panelForWidget, displays } from './displays.js';
 
 const COLS = 12;
 const MAX_ROW = 200;          // a runaway push-down cascade must terminate somewhere
@@ -465,7 +465,13 @@ function createFrame(w) {
   // Warm the module on press, not on click: displays.open() needs the click's
   // transient activation, and awaiting a cold import first can spend it.
   pop.addEventListener('pointerdown', () => { loadDisplays(); });
-  pop.addEventListener('click', () => { workspace.popOut(w.id); });
+  pop.addEventListener('click', () => {
+    // One monitor: straight out. Several: ask which one, so a widget can be
+    // sent to a named monitor without a trip through Settings.
+    const screens = safe(() => displays.screens(), []) || [];
+    if (screens.length < 2) { workspace.popOut(w.id); return; }
+    openPopMenu(pop, w.id, screens);
+  });
   head.appendChild(pop);
 
   const kill = el('button', 'icon-mini wk-w-x', '✕');
@@ -1051,6 +1057,63 @@ function buildShell() {
   }
 }
 
+/* ---- pop-out monitor menu ------------------------------------------------
+   Each item is its own click, so window.open() inside displays.open() still
+   runs with fresh user activation. */
+let popMenu = null;
+function closePopMenu() {
+  if (!popMenu) return;
+  const { node, anchor, onDoc, onKey } = popMenu;
+  popMenu = null;
+  node.remove();
+  document.removeEventListener('pointerdown', onDoc, true);
+  document.removeEventListener('keydown', onKey, true);
+  safe(() => anchor.setAttribute('aria-expanded', 'false'));
+  safe(() => anchor.focus());
+}
+function openPopMenu(anchor, id, screens) {
+  if (popMenu) { const same = popMenu.anchor === anchor; closePopMenu(); if (same) return; }
+  const node = el('div', 'wk-popmenu');
+  node.setAttribute('role', 'menu');
+  node.appendChild(el('div', 'wk-popmenu-h', i18nT('Open on')));
+  const item = (label, sub, opts) => {
+    const b = el('button', 'wk-popmenu-i');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.append(el('span', 'wk-popmenu-l', label));
+    if (sub) b.append(el('span', 'wk-popmenu-s', sub));
+    b.addEventListener('click', () => { closePopMenu(); workspace.popOut(id, opts); });
+    node.appendChild(b);
+  };
+  for (const sc of screens) {
+    const tags = [sc.current ? i18nT('this monitor') : '', sc.primary ? i18nT('primary') : ''].filter(Boolean).join(' · ');
+    item(i18nT('Monitor') + ' ' + (sc.index + 1), (sc.width + '×' + sc.height) + (tags ? ' · ' + tags : ''), { screenId: sc.id, mode: 'window' });
+  }
+  if (safe(() => displays.support().pip, false)) item(i18nT('Picture-in-Picture'), i18nT('always on top'), { mode: 'pip' });
+  document.body.appendChild(node);
+  const r = anchor.getBoundingClientRect();
+  const w = node.offsetWidth || 220;
+  node.style.top = Math.round(r.bottom + 4) + 'px';
+  node.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))) + 'px';
+  const onDoc = (e) => { if (!node.contains(e.target) && e.target !== anchor) closePopMenu(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePopMenu(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const items = [...node.querySelectorAll('.wk-popmenu-i')];
+      const i = items.indexOf(document.activeElement);
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      const next = items[((i < 0 ? (step > 0 ? -1 : 0) : i) + step + items.length) % items.length];
+      if (next) { e.preventDefault(); next.focus(); }
+    }
+  };
+  document.addEventListener('pointerdown', onDoc, true);
+  document.addEventListener('keydown', onKey, true);
+  anchor.setAttribute('aria-expanded', 'true');
+  popMenu = { node, anchor, onDoc, onKey };
+  const first = node.querySelector('.wk-popmenu-i');
+  if (first) first.focus();
+}
+
 /* ---- displays (lazy) -----------------------------------------------------
    displays.js probes permissions and registers mesh handlers at import time, so
    it must not be pulled in until something actually asks for a second window. */
@@ -1368,7 +1431,8 @@ export const workspace = {
     return out;
   },
 
-  async popOut(id) {
+  // opts = { screenId, mode } from the monitor menu; omitted = the panel's default.
+  async popOut(id, opts = {}) {
     const found = findWidget(id);
     if (!found) return { ok: false, reason: 'unknown-widget' };
     const w = found.widget;
@@ -1377,7 +1441,10 @@ export const workspace = {
     const panel = panelForWidget(w.kind);
     // The symbol on screen, fallback included: a detached copy of a widget must
     // open on what the widget was showing, not on nothing.
-    return mod.displays.open(panel, { widget: { kind: w.kind, symbol: symbolOf(w, ctx()) } });
+    const o = { widget: { kind: w.kind, symbol: symbolOf(w, ctx()) } };
+    if (opts.screenId !== undefined) o.screenId = opts.screenId;
+    if (opts.mode) o.mode = opts.mode;
+    return mod.displays.open(panel, o);
   },
 
   // reset(level?) — restore a template: the current level's, or the one named.

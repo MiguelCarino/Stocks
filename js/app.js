@@ -1659,12 +1659,8 @@ function wireDisplays() {
 
   fillScreenPicker(safe(() => displays.screens(), []) || []);
 
-  $('dispDetect').addEventListener('click', async () => {
-    const list = await displays.detectScreens().catch(() => []);
-    fillScreenPicker(list || []);
-    renderDisplays();
-    if (!list || list.length < 2) toast(i18nT('One monitor detected — panels will open on this screen.'));
-  });
+  $('dispDetect').addEventListener('click', () => { detectMonitors(); });
+  $('dispScreen').addEventListener('change', () => safe(() => renderMonitorMap()));
 
   $('dispOpen').addEventListener('click', () => {
     // No await before this call: window.open must run inside the user gesture.
@@ -1688,7 +1684,113 @@ function wireDisplays() {
   $('dispReplace').addEventListener('click', () => { displays.rePlaceAll(); renderDisplays(); });
   $('dispCloseAll').addEventListener('click', () => { displays.closeAll(); renderDisplays(); });
 
-  safe(() => displays.onChange(renderDisplays));
+  safe(() => displays.onChange(() => {
+    fillScreenPicker(safe(() => displays.screens(), []) || []);
+    renderDisplays();
+    renderMonitorBadge();
+  }));
+
+  // Never prompts: reads screen.isExtended, and loads the full layout only if
+  // the monitor permission was granted on an earlier visit.
+  Promise.resolve(safe(() => displays.autoDetect())).then(() => {
+    fillScreenPicker(safe(() => displays.screens(), []) || []);
+    renderDisplays();
+    renderMonitorBadge();
+    offerMonitors();
+  }).catch(() => {});
+}
+
+// From a click only: this is the call that may show the browser's permission prompt.
+async function detectMonitors() {
+  const list = await displays.detectScreens().catch(() => []);
+  fillScreenPicker(list || []);
+  renderDisplays();
+  renderMonitorBadge();
+  const n = (list || []).length;
+  if (n >= 2) toast(n + ' ' + i18nT('monitors detected. Use ⧉ on any widget to send it to one.'));
+  else if (displays.support().permission === 'denied') toast(i18nT('Monitor access was refused. Allow "Window management" for this site in the browser settings to aim panels.'), 'err');
+  else toast(i18nT('One monitor detected — panels will open on this screen.'));
+  return list || [];
+}
+
+function renderMonitorBadge() {
+  const b = $('btnDisplays');
+  if (!b) return;
+  const n = (safe(() => displays.screens(), []) || []).length;
+  const ext = safe(() => displays.support().extended, null);
+  const count = n >= 2 ? n : ext ? 2 : 0;
+  if (count) b.dataset.count = n >= 2 ? String(n) : '2+';
+  else delete b.dataset.count;
+  b.title = count
+    ? (n >= 2 ? n + ' ' + i18nT('monitors detected') : i18nT('More than one monitor detected')) + ' — ' + i18nT('Detached displays')
+    : i18nT('Detached displays');
+}
+
+/* A second monitor is visible to the page (screen.isExtended) but its layout is
+   not: offer setup once. The button is the gesture getScreenDetails() needs. */
+function offerMonitors() {
+  if (!safe(() => displays.shouldOffer(), false)) return;
+  if (document.querySelector('.toast.mon-offer')) return;
+  const t = el('div', 'toast mon-offer');
+  t.setAttribute('role', 'status');
+  t.append(el('span', 'mon-offer-t', i18nT('Another monitor is connected. Put charts or the watchlist on it?')));
+  const go = el('button', 'btn-primary', i18nT('Set up monitors'));
+  const no = el('button', 'cs-btn', i18nT('Not now'));
+  const done = () => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); };
+  go.addEventListener('click', () => {
+    safe(() => displays.dismissOffer());
+    done();
+    detectMonitors().then(() => openSettings('displaysSection'));
+  });
+  no.addEventListener('click', () => { safe(() => displays.dismissOffer()); done(); });
+  t.append(go, no);
+  $('toastRack').appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+}
+
+/* The monitors as the OS arranges them, to scale. Clicking one picks it as the
+   target for "Open panel"; each shows how many panels sit on it. */
+function renderMonitorMap() {
+  const map = $('dispMap'), note = $('dispMapNote');
+  if (!map) return;
+  const screens = state.screens || [];
+  map.textContent = '';
+  const sup = displays.support();
+  if (screens.length < 2) {
+    map.hidden = true;
+    note.hidden = false;
+    note.textContent = i18nT(!sup.windowMgmt
+      ? 'This browser cannot see other monitors (Chrome and Edge can). Open a panel and drag it across.'
+      : sup.extended === false
+        ? 'Only one monitor is connected.'
+        : 'Press "Detect monitors" to show your monitor layout here.');
+    return;
+  }
+  note.hidden = true;
+  map.hidden = false;
+  const minX = Math.min(...screens.map((s) => s.left)), minY = Math.min(...screens.map((s) => s.top));
+  const maxX = Math.max(...screens.map((s) => s.left + s.width)), maxY = Math.max(...screens.map((s) => s.top + s.height));
+  const W = Math.max(1, maxX - minX), H = Math.max(1, maxY - minY);
+  map.style.aspectRatio = (W / H).toFixed(3);
+  const open = safe(() => displays.openPanels(), []) || [];
+  const sel = $('dispScreen').value;
+  for (const sc of screens) {
+    const b = el('button', 'disp-mon' + (sc.current ? ' current' : '') + (sc.id === sel ? ' selected' : ''));
+    b.type = 'button';
+    b.style.left = ((sc.left - minX) / W * 100) + '%';
+    b.style.top = ((sc.top - minY) / H * 100) + '%';
+    b.style.width = (sc.width / W * 100) + '%';
+    b.style.height = (sc.height / H * 100) + '%';
+    const nOpen = open.filter((p) => p.alive && p.screenId === sc.id).length;
+    b.append(el('span', 'dm-n', String(sc.index + 1)));
+    b.append(el('span', 'dm-r', sc.width + '×' + sc.height));
+    const tags = [sc.current ? i18nT('this one') : '', sc.primary ? i18nT('primary') : '', nOpen ? nOpen + ' ' + i18nT(nOpen === 1 ? 'panel' : 'panels') : ''].filter(Boolean);
+    if (tags.length) b.append(el('span', 'dm-t', tags.join(' · ')));
+    b.setAttribute('aria-pressed', sc.id === sel ? 'true' : 'false');
+    b.setAttribute('aria-label', i18nT('Monitor') + ' ' + (sc.index + 1) + ', ' + sc.width + '×' + sc.height + (tags.length ? ', ' + tags.join(', ') : ''));
+    b.addEventListener('click', () => { $('dispScreen').value = sc.id; renderMonitorMap(); });
+    map.appendChild(b);
+  }
 }
 
 function renderPanelDesc() {
@@ -1720,6 +1822,7 @@ function screenLabel(id) {
 
 function renderDisplays() {
   const sup = displays.support();
+  safe(() => renderMonitorMap());
   const caps = $('dispCaps');
   caps.textContent = '';
 

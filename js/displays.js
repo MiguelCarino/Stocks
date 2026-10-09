@@ -227,6 +227,8 @@ function normalizeConfig(raw) {
     screens: Array.isArray(c.screens) ? c.screens : [],
     screensAt: Number(c.screensAt) || 0,
     currentScreen: typeof c.currentScreen === 'string' ? c.currentScreen : null,
+    // The "another monitor is connected" offer is made once, not on every load.
+    hint: c.hint === 'done' ? 'done' : null,
   };
 }
 
@@ -383,6 +385,67 @@ function verifyPlacement(entry, box) {
     }
   } catch (e) { ok = null; }
   if (entry.placed !== ok) { entry.placed = ok; emit(); }
+}
+
+/* ---- Automatic detection ----------------------------------------------------
+   Two levels, so nothing ever prompts on its own:
+     screen.isExtended  - a plain boolean (Chromium) saying "more than one monitor",
+                          readable without permission, with a 'change' event when a
+                          monitor is plugged in or out. Enough to OFFER setup.
+     getScreenDetails() - the full layout. Once the permission is granted it
+                          resolves without a prompt, so autoDetect() calls it at
+                          boot and keeps the 'screenschange' subscription alive.
+                          Before that it is only ever called from a click.
+   When the layout changes under open windows, a panel whose monitor is still
+   there is re-placed on it; one whose monitor vanished falls back to the screen
+   this window is on, and its saved choice is cleared so it does not chase a
+   monitor that is no longer connected. */
+
+let extended = null;    // screen.isExtended, or null where the browser cannot say
+let autoWired = false;
+
+function readExtended() {
+  try {
+    const v = window.screen && window.screen.isExtended;
+    return typeof v === 'boolean' ? v : null;
+  } catch (e) { return null; }
+}
+
+function subscribe(d) {
+  if (!d || d === details) return;
+  details = d;
+  if (d.addEventListener) d.addEventListener('screenschange', onLayoutChange);
+}
+
+function onLayoutChange() {
+  snapshot();
+  const ids = new Set(listFromDetails(details).map((s) => s.id));
+  const cfg = readConfig();
+  for (const e of live.values()) {
+    if (e.screenId && !ids.has(e.screenId)) {
+      e.screenId = null;
+      if (cfg.panels[e.panelId]) cfg.panels[e.panelId].screenId = null;
+    }
+  }
+  writeConfig(cfg);
+  try { displays.rePlaceAll(); } catch (e) { /* placement is best-effort */ }
+  emit();
+}
+
+async function silentDetails() {
+  if (!('getScreenDetails' in window)) return false;
+  probePermission();
+  try {
+    const st = await navigator.permissions.query({ name: 'window-management' })
+      .catch(() => navigator.permissions.query({ name: 'window-placement' }));
+    if (!st || st.state !== 'granted') return false;
+  } catch (e) { return false; }
+  try {
+    subscribe(await window.getScreenDetails());
+    permState = 'granted';
+    snapshot();
+    return true;
+  } catch (e) { return false; }
 }
 
 /* ---- Live panels ---------------------------------------------------------- */
@@ -640,20 +703,59 @@ export const displays = {
       pip: 'documentPictureInPicture' in window,
       popup: true,
       permission: permState || 'unavailable',
+      // true/false from the browser, null when it cannot tell (Firefox, Safari).
+      extended: extended != null ? extended : readExtended(),
     };
   },
+
+  /* Boot-time detection that never prompts. Reads screen.isExtended, follows its
+     'change' event, and — if the monitor permission was granted on an earlier
+     visit — loads the full layout silently. Safe to call more than once. */
+  async autoDetect() {
+    extended = readExtended();
+    if (!autoWired) {
+      autoWired = true;
+      try {
+        if (window.screen && window.screen.addEventListener) {
+          window.screen.addEventListener('change', () => {
+            const was = extended;
+            extended = readExtended();
+            if (was !== extended) {
+              // A monitor came or went. With permission the layout follows;
+              // without it, the next offer is allowed to appear again.
+              if (extended) { const cfg = readConfig(); cfg.hint = null; writeConfig(cfg); }
+              silentDetails().then(() => emit(), () => emit());
+            }
+          });
+        }
+      } catch (e) { /* no screen events: detection still works from a click */ }
+    }
+    await silentDetails();
+    emit();
+    return { extended, screens: this.screens() };
+  },
+
+  // Whether to offer multi-monitor setup: more than one monitor, and the full
+  // layout is not known yet, and the offer was not already declined or taken.
+  shouldOffer() {
+    const cfg = readConfig();
+    if (cfg.hint === 'done') return false;
+    if (!('getScreenDetails' in window)) return false;
+    if (permState === 'denied') return false;
+    return extended === true && this.screens().length < 2;
+  },
+
+  dismissOffer() { const cfg = readConfig(); cfg.hint = 'done'; writeConfig(cfg); },
 
   // The ONLY entry point allowed to prompt. Call it from a click.
   async detectScreens() {
     if (!('getScreenDetails' in window)) return this.screens();
     try {
-      const d = await window.getScreenDetails();
-      details = d;
-      if (d.addEventListener) d.addEventListener('screenschange', () => { snapshot(); emit(); });
+      subscribe(await window.getScreenDetails());
       snapshot();
       permState = 'granted';
       emit();
-      return listFromDetails(d);
+      return listFromDetails(details);
     } catch (e) {
       permState = 'denied';
       permProbed = false;

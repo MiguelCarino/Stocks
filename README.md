@@ -46,6 +46,12 @@ A level decides what is **offered first**: chart types, indicators, alert condit
 - **The command palette** (Ctrl/⌘+K) and single-key shortcuts (press `?` for the list).
 - **Raw provider diagnostics** in Settings → Data & providers: error messages, queued requests and cool-downs.
 - **Detached displays**: put any widget in its own window or a Picture-in-Picture tile on another monitor. Panels reuse this window's data and make no API calls of their own.
+- **Multi-monitor detection** (Chrome and Edge, via the Window Management API):
+  - On load the page reads `screen.isExtended`, which needs no permission. If a second monitor is connected it offers **Set up monitors** once. That click is the only thing that can trigger the browser's "Manage windows on all your displays" prompt.
+  - Once permission is granted, later visits load the monitor layout silently. Plugging a monitor in or out updates it live: windows are re-placed, and a panel whose monitor disappeared falls back to this screen.
+  - The ⧉ header button shows how many monitors were found. **Settings → Detached displays** draws them to scale; click one to target it.
+  - With more than one monitor, each widget's ⧉ button asks which monitor to open on.
+  - Firefox and Safari cannot see other monitors: open the panel and drag it across. Wayland and most tiling window managers ignore window placement, and the UI says so when that happens.
 
 ## Keyboard shortcuts
 
