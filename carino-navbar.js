@@ -3,7 +3,14 @@
    ------------------------------------------------------------
    Drop this file into any Carino Systems project and include it:
 
-     <script src="carino-navbar.js" data-app="AppName" defer></script>
+     <script src="carino-navbar.js" data-app="AppName" data-repo="RepoName" defer></script>
+
+   data-app is the little tag next to the brand; data-repo is the
+   GitHub repository the header's GitHub button points at. They
+   differ on the few sites whose repo name is longer than the tag
+   (Netplan/NetplanConfig, Setup/SimpleSetup, Software/
+   SoftwareCatalog, SyncSubs/SyncSubsStudio), so data-repo falls
+   back to data-app and, failing that, to the profile page.
 
    It injects its own (scoped) styles + the canonical top-header
    markup and runs the greeting. The live CLOCK (Local/UTC/Epoch/
@@ -21,11 +28,29 @@
    Brand links: "Carino" goes to the hub (carino.systems); the
    app-tag next to it links to the app's own root — clicking it
    acts as a fresh reload of the current site.
+
+   Right-cluster order is fixed by CSS `order`, not by DOM
+   position, because four different scripts insert into it and
+   none of them can rely on the others having run yet. Read it
+   from the right edge inwards — the socials anchor the row and
+   language sits immediately beside them:
+     1  the app's own controls (.cn-actions)
+     2  status     (carino-diag.js, or an app's own toggle)
+     3  language   (carino-lang.js)
+     4  legal + GitHub + LinkedIn — always last
+
+   The shield in that last group opens carino.systems/legal.html, the one
+   legal notice, privacy and cookie page for every site. carino-lang.js
+   translates its tooltip (it finds the link by its id, #cnLegal).
    ============================================================ */
 (function () {
   'use strict';
 
-  var TAG = (document.currentScript && document.currentScript.getAttribute('data-app')) || '';
+  var SCRIPT = document.currentScript;
+  var TAG = (SCRIPT && SCRIPT.getAttribute('data-app')) || '';
+  // The GitHub button points at THIS project's repository, not the profile.
+  var REPO = (SCRIPT && SCRIPT.getAttribute('data-repo')) || TAG;
+  var GH_URL = 'https://github.com/MiguelCarino' + (REPO ? '/' + REPO : '');
   var CLOCK_SRC = 'carino-clock.js'; // local copy shipped in each site (no CDN)
 
   var CSS = ''
@@ -59,12 +84,22 @@
     + '#carinoNav .icon-btn svg{width:15px;height:15px;}'
     + '#carinoNav .cn-right{gap:12px;min-width:0;}'
     + '#carinoNav .cn-actions{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;min-width:0;}'
-    + '#carinoNav .cn-actions + .social-row{border-left:1px solid var(--cn-border);padding-left:12px;}'
+    // Slot order, independent of which script inserted what first.
+    + '#carinoNav .cn-right > *{order:1;}'
+    + '#carinoNav .cn-right > #cnDiagBtn,#carinoNav .cn-right > .status-toggle{order:2;}'
+    + '#carinoNav .cn-right > #cnLangBtn{order:3;}'
+    + '#carinoNav .cn-right > .social-row{order:4;}'
+    // The divider only makes sense when something sits to the left of it;
+    // :only-child covers the sites that ship neither language nor actions.
+    + '#carinoNav .cn-right > .social-row:not(:only-child){border-left:1px solid var(--cn-border);padding-left:12px;}'
     + '@media(max-width:900px){#carinoNav .header-clock{display:none;}}'
     + '@media(max-width:640px){#carinoNav .app-tag{display:none;}}';
 
   var GH = 'M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22';
   var LI = 'M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z';
+  var SHIELD = 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z';
+  var LEGAL_URL = 'https://carino.systems/legal.html';
+  var LEGAL = 'Legal notice & privacy';
 
   var MARKUP = ''
     + '<header class="top-header" id="carinoNav">'
@@ -80,7 +115,8 @@
     + '</div></div>'
     + '<div class="cn-right">'
     + '<div class="social-row">'
-    + '<a href="https://github.com/MiguelCarino" target="_blank" rel="noopener" class="icon-btn" title="GitHub" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + GH + '"></path></svg></a>'
+    + '<a href="' + LEGAL_URL + '" class="icon-btn" id="cnLegal" title="' + LEGAL + '" aria-label="' + LEGAL + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + SHIELD + '"></path></svg></a>'
+    + '<a href="' + GH_URL + '" target="_blank" rel="noopener" class="icon-btn" title="' + (REPO ? REPO + ' on GitHub' : 'GitHub') + '" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + GH + '"></path></svg></a>'
     + '<a href="https://www.linkedin.com/in/miguelcarino94/" target="_blank" rel="noopener" class="icon-btn" title="LinkedIn" aria-label="LinkedIn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + LI + '"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg></a>'
     + '</div>'
     + '</div>'
