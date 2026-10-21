@@ -2,6 +2,8 @@
 
 An open-source markets monitor for stocks, ETFs, crypto and currencies, part of [Carino Systems](https://carino.systems). Live at **stocks.carino.systems**.
 
+![Stocks](screenshot.webp)
+
 It runs entirely in your browser. You bring your own free API keys, and your watchlist, transactions, alerts and notes are stored in this browser and nowhere else.
 
 > **Monitoring, visualization and education only.** Stocks does not place trades, connect to a brokerage, move money or give advice. Screener presets, calculators and lessons are labelled educational. Quotes may be delayed, and alerts only fire while a Stocks tab is open.

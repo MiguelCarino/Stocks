@@ -5,7 +5,7 @@
   --accent:#eab308; --accent-hi:#fbbf24;
   --accent-faint:rgba(234,179,8,.05); --accent-glow:rgba(234,179,8,.15); --accent-dim:rgba(234,179,8,.3);
   --border:#262626; --border-hi:#3a3a3a;
-  --text:#fff; --text-sec:#a3a3a3; --text-muted:#666;
+  --text:#fff; --text-sec:#a3a3a3; --text-muted:#8a8a8a;
   --ok:#22c55e; --warn:#eab308; --err:#ef4444;
   --sans:'IBM Plex Sans',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace; --display:'Red Hat Display',var(--sans);
   --nav-h:60px;
