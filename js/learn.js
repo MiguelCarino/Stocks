@@ -742,7 +742,7 @@ export function mountLessons(host, opts = {}) {
       });
     });
     const last = i === steps.length - 1;
-    const next = el('button', 'btn-primary sm', last ? i18nT('Finish lesson') : i18nT('Next') + ' →');
+    const next = el('button', 'btn btn-primary sm', last ? i18nT('Finish lesson') : i18nT('Next') + ' →');
     next.type = 'button';
     next.addEventListener('click', () => {
       if (!last) { view.step = i + 1; paintLesson(); return; }
@@ -916,7 +916,7 @@ export function startTour(steps, opts = {}) {
   const acts = el('div', 'learn-step-acts');
   const skip = el('button', 'learn-link', i18nT('Skip tour'));
   const back = el('button', 'cs-btn', '← ' + i18nT('Back'));
-  const next = el('button', 'btn-primary sm', i18nT('Next') + ' →');
+  const next = el('button', 'btn btn-primary sm', i18nT('Next') + ' →');
   for (const b of [skip, back, next]) b.type = 'button';
   acts.append(skip, el('span', 'spacer'), back, next);
   card.append(count, title, body, tryP, acts);

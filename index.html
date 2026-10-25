@@ -32,6 +32,7 @@
        list on a no-build static host strands users on a stale bundle. -->
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="fonts/carino-fonts.css" />
+  <link rel="stylesheet" href="carino-ui.css" />
   <link rel="stylesheet" href="css/stocks.css" />
   <!-- After stocks.css, deliberately: the workspace owns its own scrolling and
        stacking rules and must be able to override the card-view ones. -->
@@ -44,20 +45,23 @@
   <!-- App controls; carino-navbar.js relocates this into the shared navbar. -->
   <header class="cs-header" data-carino-strip>
     <div class="cs-right" data-carino-actions>
-      <!-- Below 900px the rail is off-canvas; this is the only way to reach it. -->
-      <button class="cs-btn rail-toggle" id="btnRail" title="Watchlist and search" aria-controls="rail" aria-expanded="false">☰</button>
-      <span class="live-chip" id="modeChip" title="Data source">DEMO</span>
-      <!-- Experience level: what is offered first, never what is possible. -->
-      <button class="cs-btn lvl-btn" id="btnLevel" aria-haspopup="dialog" aria-expanded="false" aria-controls="levelPop"><span class="lvl-ico" aria-hidden="true">◐</span><span id="btnLevelTxt">Beginner</span></button>
-      <button class="sess-chip" id="sessChip" data-state="closed" title="Market session (this device's clock)">
-        <span class="sc-dot"></span><span class="sc-txt" id="sessChipTxt">—</span>
-      </button>
+      <!-- Live standard, left to right: source badge, freshness, refresh
+           controls, the one main action; the rest folds into the navbar's ⋯. -->
+      <span class="live-chip sample" id="modeChip" title="Data source" data-priority="2">DEMO</span>
+      <span class="fresh" id="freshStamp" hidden></span>
       <button class="cs-btn" id="btnPause" title="Pause / resume auto-refresh">⏸</button>
       <select class="cs-btn cs-select" id="intervalSel" title="Refresh interval">
         <option value="5">5s</option><option value="15" selected>15s</option>
         <option value="30">30s</option><option value="60">60s</option>
       </select>
-      <button class="cs-btn" id="btnAdd" title="Add ticker">＋</button>
+      <button class="cs-btn primary" id="btnAdd" title="Add ticker" data-priority="1">＋</button>
+      <!-- Below 900px the rail is off-canvas; this is the only way to reach it. -->
+      <button class="cs-btn rail-toggle" id="btnRail" title="Watchlist and search" aria-controls="rail" aria-expanded="false">☰</button>
+      <!-- Experience level: what is offered first, never what is possible. -->
+      <button class="cs-btn lvl-btn" id="btnLevel" aria-haspopup="dialog" aria-expanded="false" aria-controls="levelPop"><span class="lvl-ico" aria-hidden="true">◐</span><span id="btnLevelTxt">Beginner</span></button>
+      <button class="sess-chip" id="sessChip" data-state="closed" title="Market session (this device's clock)">
+        <span class="sc-dot"></span><span class="sc-txt" id="sessChipTxt">—</span>
+      </button>
       <!-- Shortcuts to the tab that shows each thing, not a second navigation:
            the workspace tabs own what is on screen. -->
       <div class="seg hdr-tabs-seg" role="group" aria-label="Jump to workspace tab">
@@ -92,7 +96,7 @@
       <strong data-i18n>Shared view.</strong> <span data-i18n>This watchlist came from the link you opened. It is not saved in this browser, and your own watchlist is untouched.</span>
     </div>
     <div class="hb-acts">
-      <button class="btn-primary sm" id="hashAdopt" data-i18n>Save to my browser</button>
+      <button class="btn btn-primary sm" id="hashAdopt" data-i18n>Save to my browser</button>
       <button class="cs-btn" id="hashDiscard" data-i18n>Discard</button>
     </div>
   </div>
@@ -135,7 +139,7 @@
            offer to fill it, so the offer lives beside the list itself. -->
       <div class="rail-empty" id="railEmpty" hidden>
         <p data-i18n>Your watchlist is empty.</p>
-        <button class="btn-primary sm" id="emptyAdd" data-i18n>Add a ticker</button>
+        <button class="btn btn-primary sm" id="emptyAdd" data-i18n>Add a ticker</button>
         <button class="cs-btn" id="emptyDemo" data-i18n>Load demo watchlist</button>
       </div>
       <div class="rail-foot">
@@ -302,7 +306,7 @@
             <button class="cs-btn" id="dispDetect" data-i18n>Detect monitors</button>
           </div>
           <div class="disp-acts">
-            <button class="btn-primary" id="dispOpen" data-i18n>Open panel</button>
+            <button class="btn btn-primary" id="dispOpen" data-i18n>Open panel</button>
             <button class="cs-btn" id="dispReplace" data-i18n>Re-place windows</button>
             <button class="cs-btn" id="dispCloseAll" data-i18n>Close all</button>
           </div>
@@ -318,7 +322,7 @@
         <span class="spacer"></span>
         <button class="cs-btn" id="btnExport" data-i18n>Export</button>
         <button class="cs-btn" id="btnImport" data-i18n>Import</button>
-        <button class="btn-primary" id="btnSaveSettings" data-i18n>Save</button>
+        <button class="btn btn-primary" id="btnSaveSettings" data-i18n>Save</button>
       </div>
     </div>
 
@@ -376,7 +380,7 @@
             <span class="field-note warn-note" id="ruleErr" hidden></span>
             <span class="spacer"></span>
             <button class="cs-btn" id="ruleCancel" hidden data-i18n>Cancel edit</button>
-            <button class="btn-primary" id="ruleAdd" data-i18n>Add alert</button>
+            <button class="btn btn-primary" id="ruleAdd" data-i18n>Add alert</button>
           </div>
         </div>
         <div class="log-head">
@@ -447,7 +451,7 @@
         <button class="cs-btn" id="ledExport" title="Download every transaction as CSV" data-i18n>Export CSV</button>
         <button class="cs-btn" id="ledExportPos" title="Download current positions as CSV" data-i18n>Positions CSV</button>
         <span class="spacer"></span>
-        <button class="btn-primary" id="ledAdd" data-i18n>＋ Add transaction</button>
+        <button class="btn btn-primary" id="ledAdd" data-i18n>＋ Add transaction</button>
       </div>
     </div>
 
@@ -487,7 +491,7 @@
         <button class="cs-btn danger" id="txDelete" hidden data-i18n>Delete</button>
         <button class="cs-btn" id="txBack" data-i18n>All transactions</button>
         <span class="spacer"></span>
-        <button class="btn-primary" id="txSave" data-i18n>Save</button>
+        <button class="btn btn-primary" id="txSave" data-i18n>Save</button>
       </div>
     </div>
 
@@ -539,7 +543,7 @@
       <div class="modal-foot">
         <button class="cs-btn" id="impBack" data-i18n>All transactions</button>
         <span class="spacer"></span>
-        <button class="btn-primary" id="impGo" disabled data-i18n>Import</button>
+        <button class="btn btn-primary" id="impGo" disabled data-i18n>Import</button>
       </div>
     </div>
   </div>
@@ -550,8 +554,8 @@
   <!-- Toast rack -->
   <div class="toast-rack" id="toastRack"></div>
 
-  <!-- Footer disclaimer -->
-  <footer class="page-disclaimer" id="pageDisclaimer"></footer>
+  <!-- Source line: the full disclaimer stays in the acknowledgement gate. -->
+  <footer class="data-foot page-disclaimer" id="pageDisclaimer"></footer>
 
   <!-- First-load acknowledgment gate -->
   <div class="ack-gate" id="ackGate" hidden>
@@ -559,7 +563,7 @@
       <div class="ack-brand" id="ackBrand">Carino <span>Stocks</span></div>
       <div class="ack-step" id="ackStep1">
         <p class="ack-text" id="ackText"></p>
-        <button class="btn-primary" id="ackBtn" data-i18n>I understand — continue</button>
+        <button class="btn btn-primary" id="ackBtn" data-i18n>I understand — continue</button>
       </div>
       <!-- Step 2, first run only: how much of the tool to show first. -->
       <div class="ack-step" id="ackStep2" hidden>

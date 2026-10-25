@@ -229,7 +229,7 @@ function createPortfolio(host, ctx) {
   wrap.appendChild(table);
   const empty = el('div', 'wg-folio-empty');
   const emptyTxt = el('p', 'empty-cell', i18nT('No holdings yet.'));
-  const emptyBtn = el('button', 'btn-primary sm', i18nT('Add your first holding'));
+  const emptyBtn = el('button', 'btn btn-primary sm', i18nT('Add your first holding'));
   emptyBtn.type = 'button';
   emptyBtn.addEventListener('click', () => safe(() => cur.openLedger({ add: true })));
   const emptyImp = el('button', 'cs-btn sm', i18nT('Import a broker CSV'));

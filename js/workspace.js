@@ -554,7 +554,7 @@ function renderEmpty(tab) {
   if (existing) return;
   const box = el('div', 'wk-empty');
   box.appendChild(el('p', null, i18nT('This tab is empty.')));
-  const add = el('button', 'btn-primary', i18nT('Add a widget'));
+  const add = el('button', 'btn btn-primary', i18nT('Add a widget'));
   add.type = 'button';
   add.addEventListener('click', () => openPicker());
   box.appendChild(add);

@@ -43,7 +43,7 @@ import { workspace } from './workspace.js';
 // One copy of every number format, shared with the widgets and the popout. The
 // old local copies inferred FX from app state; these take { fx } from the caller,
 // which is why they can be shared at all.
-import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime, priceKind } from './format.js';
+import { fmtPrice, fmtMove, fmtNum, fmtInt, fmtTime, fmtAge, priceKind } from './format.js';
 
 const $ = (id) => document.getElementById(id);
 // UI-string translation via the site dictionary (i18n.js); identity when absent.
@@ -97,7 +97,6 @@ function boot() {
   // drawing from caches the store is about to drop anyway.
   safe(() => store.evictCaches && store.evictCaches());
 
-  $('pageDisclaimer').textContent = i18nT(DISCLAIMER);
   $('railDisclaimer').textContent = i18nT('Data stays in your browser. Not investment advice.');
   $('ackText').textContent = i18nT(DISCLAIMER);
   $('sessApprox').textContent = i18nF('Holiday table ends {date} — later dates are rule-derived, not confirmed', { date: HOLIDAY_HORIZON });
@@ -142,6 +141,7 @@ function startClock() {
   let n = 0;
   clockTimer = setInterval(() => {
     renderSession();
+    updateModeChip();
     refreshWidgets();
     if (++n % 10 === 0) checkLeadership();
   }, 1000);
@@ -1191,10 +1191,11 @@ function wireControls() {
     const p = !scheduler.isPaused(); scheduler.setPaused(p);
     $('btnPause').textContent = p ? '▶' : '⏸';
     $('btnPause').classList.toggle('active', p);
+    updateModeChip();
     publishFrame();
   });
   $('intervalSel').addEventListener('change', (e) => {
-    store.settings.interval = +e.target.value; store.saveSettings(); publishState();
+    store.settings.interval = +e.target.value; store.saveSettings(); publishState(); updateModeChip();
   });
   $('intervalSel').value = String(store.settings.interval);
   $('btnAdd').addEventListener('click', () => openModal('addModal', () => { $('addSearch').value = ''; $('addAuto').textContent = ''; $('addSearch').focus(); }));
@@ -1734,7 +1735,7 @@ function offerMonitors() {
   const t = el('div', 'toast mon-offer');
   t.setAttribute('role', 'status');
   t.append(el('span', 'mon-offer-t', i18nT('Another monitor is connected. Put charts or the watchlist on it?')));
-  const go = el('button', 'btn-primary', i18nT('Set up monitors'));
+  const go = el('button', 'btn btn-primary', i18nT('Set up monitors'));
   const no = el('button', 'cs-btn', i18nT('Not now'));
   const done = () => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); };
   go.addEventListener('click', () => {
@@ -2280,13 +2281,46 @@ function toast(msg, kind) {
 }
 
 /* ---- misc ----------------------------------------------------------------- */
+/* The source badge and its "Updated" stamp. Every state reads differently:
+   an error, a frame older than the stale threshold and a user pause each get
+   their own class, so old prices never wear the LIVE badge. Called from the
+   one-second clock as well as on every fetch, because staleness arrives by the
+   clock, not by a fetch. */
 function updateModeChip() {
   const chip = $('modeChip');
   if (!chip) return;
-  if (state.fetchError) { chip.textContent = i18nT('ERROR'); chip.classList.remove('live'); chip.title = state.fetchError; return; }
   const m = market.modeLabel();
-  chip.textContent = m.text; chip.classList.toggle('live', m.live);
-  chip.title = i18nT('Data source') + (leaderless ? ' · ' + i18nT('refreshing independently: no window holds the shared lock') : '');
+  const demo = safe(() => market.isDemoMode(), true);
+  const paused = !!(scheduler && scheduler.isPaused());
+  const stale = frameStaleMs();
+  let text = m.text, kind = m.live ? 'live' : 'sample', title = i18nT('Data source');
+  if (state.fetchError) { text = i18nT('ERROR'); kind = 'err'; title = state.fetchError; }
+  else if (paused) { text = i18nT('PAUSED'); kind = 'paused'; }
+  else if (stale && !demo) { text = i18nT('STALE') + ' · ' + fmtAge(stale); kind = 'stale'; }
+  else if (leaderless) title += ' · ' + i18nT('refreshing independently: no window holds the shared lock');
+  if (chip.textContent !== text) chip.textContent = text;
+  chip.className = 'live-chip ' + kind;
+  chip.title = title;
+
+  const fresh = $('freshStamp');
+  if (fresh) {
+    fresh.hidden = !state.lastUpdated;
+    const ft = state.lastUpdated ? i18nT('Updated') + ' ' + fmtTime(state.lastUpdated) : '';
+    if (fresh.textContent !== ft) fresh.textContent = ft;
+    fresh.className = 'fresh' + (kind === 'err' ? ' err' : kind === 'stale' ? ' stale' : kind === 'paused' ? ' paused' : '');
+  }
+  renderDataFoot(demo, m);
+}
+
+// The one-line source footer; the long disclaimer lives in the first-run gate.
+function renderDataFoot(demo, m) {
+  const foot = $('pageDisclaimer');
+  if (!foot) return;
+  const src = demo ? i18nT('bundled sample data') : (m.text.split(' · ')[1] || m.text);
+  const delay = demo ? i18nT('no network calls') : i18nF('quotes may be delayed, refreshed every {n}s', { n: Number(store.settings.interval) || 15 });
+  const text = i18nF('Data: {source}, {delay}.', { source: src, delay })
+    + ' ' + i18nT('Runs in your browser; nothing is uploaded.') + ' ' + i18nT('Monitoring only, not advice.');
+  if (foot.textContent !== text) foot.textContent = text;
 }
 /* i18n.js re-applies the static markup, the attribute table and the three
    boot-filled ids, but everything this file and the widgets build from JS keeps

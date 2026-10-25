@@ -1,14 +1,8 @@
 /* stocks.css — Carino Stocks. Uses the fleet design tokens (single gold accent
    on near-black; --ok green gains / --err red losses). */
 :root{
-  --bg:#050505; --bg-elev:#0d0d0d; --bg-card:#0b0b0b;
-  --accent:#eab308; --accent-hi:#fbbf24;
-  --accent-faint:rgba(234,179,8,.05); --accent-glow:rgba(234,179,8,.15); --accent-dim:rgba(234,179,8,.3);
-  --border:#262626; --border-hi:#3a3a3a;
-  --text:#fff; --text-sec:#a3a3a3; --text-muted:#8a8a8a;
-  --ok:#22c55e; --warn:#eab308; --err:#ef4444;
-  --sans:'IBM Plex Sans',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace; --display:'Red Hat Display',var(--sans);
-  --nav-h:60px;
+  /* Fleet tokens come from carino-ui.css; these two shades are Stocks' own. */
+  --accent-hi:#fbbf24; --border-hi:#3a3a3a;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;}
@@ -18,19 +12,14 @@ a{color:var(--accent);}
 
 /* ---- app controls in navbar ---- */
 .cs-header{display:none;}                 /* relocated into the navbar; hidden as-is */
-.cs-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:32px;min-width:32px;padding:0 9px;
-  background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--text-sec);
-  font-family:var(--mono);font-size:.72rem;cursor:pointer;transition:.15s;white-space:nowrap;}
-.cs-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-faint);}
+/* .cs-btn itself comes from carino-ui.css; Stocks only tightens it for its dense bar. */
+.cs-btn{justify-content:center;gap:5px;min-width:32px;padding:0 9px;}
 .cs-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent-faint);}
 .cs-btn.danger:hover{border-color:var(--err);color:var(--err);background:rgba(239,68,68,.08);}
 .cs-select{padding:0 6px;} select.cs-select{-webkit-appearance:none;appearance:none;}
 .seg{display:inline-flex;border:1px solid var(--border);border-radius:5px;overflow:hidden;}
 .seg .seg-btn{border:none;border-radius:0;height:30px;}
 .seg .seg-btn+.seg-btn{border-left:1px solid var(--border);}
-.live-chip{font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:3px 6px;white-space:nowrap;}
-.live-chip.live{color:var(--ok);border-color:rgba(34,197,94,.4);}
 
 /* ---- session chip ----
    Five states plus two modifiers. The dot carries the state colour so the text
@@ -64,7 +53,7 @@ a{color:var(--accent);}
 .hb-text{font-size:.76rem;color:var(--text-sec);line-height:1.5;flex:1;min-width:240px;}
 .hb-text strong{color:var(--accent);}
 .hb-acts{display:flex;gap:8px;}
-.btn-primary.sm{height:30px;padding:0 12px;font-size:.74rem;}
+.btn.btn-primary.sm{height:30px;padding:0 12px;font-size:.74rem;}
 
 /* ---- market strip ---- */
 .market-strip{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:16px;
@@ -179,9 +168,7 @@ select.input{-webkit-appearance:none;appearance:none;}
 .empty-actions{display:flex;gap:10px;justify-content:center;margin-top:16px;}
 
 /* ---- buttons ---- */
-.btn-primary{background:var(--accent);color:#050505;border:none;border-radius:5px;height:34px;padding:0 16px;
-  font-family:var(--sans);font-weight:700;font-size:.82rem;cursor:pointer;transition:.15s;}
-.btn-primary:hover{background:var(--accent-hi);}
+.btn.btn-primary{height:34px;}
 
 /* ---- portfolio table ---- */
 .stat-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
@@ -277,9 +264,6 @@ table.data tr:hover td{background:var(--accent-faint);}
 .rule-list{display:flex;flex-direction:column;gap:6px;}
 .rule-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:5px;}
 .rule-cond{font-family:var(--mono);font-size:.72rem;color:var(--text-sec);flex:1;}
-.switch{width:34px;height:18px;border-radius:9px;background:var(--border);border:none;position:relative;cursor:pointer;flex-shrink:0;transition:.15s;}
-.switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--text-muted);transition:.15s;}
-.switch.on{background:var(--accent);} .switch.on::after{left:18px;background:#050505;}
 .log-head{display:flex;align-items:center;gap:8px;margin-top:12px;}
 .log-head .rail-lbl{flex:1;}
 .alert-log{display:flex;flex-direction:column;gap:5px;}
@@ -296,8 +280,7 @@ table.data tr:hover td{background:var(--accent-faint);}
 .toast.alert{border-left-color:var(--accent);} .toast.err{border-left-color:var(--err);}
 
 /* ---- disclaimers ---- */
-.page-disclaimer{padding:12px 20px;border-top:1px solid var(--border);background:var(--bg-elev);
-  font-size:.62rem;color:var(--text-muted);line-height:1.5;text-align:center;}
+.page-disclaimer{padding:8px 20px;background:var(--bg-elev);text-align:center;}
 
 /* ---- ack gate ---- */
 .ack-gate{position:fixed;inset:0;background:rgba(5,5,5,.92);z-index:400;display:flex;align-items:center;justify-content:center;padding:24px;}

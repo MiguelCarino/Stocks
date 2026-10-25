@@ -5,18 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Chart Harness</title>
 <link rel="stylesheet" href="../fonts/carino-fonts.css" />
+<link rel="stylesheet" href="../carino-ui.css" />
 <link rel="stylesheet" href="../css/stocks.css" />
 <link rel="stylesheet" href="../css/chart.css" />
-<style>
+<script>
   /* The app itself is dark-only; this light set exists so the chart engine can
-     be checked against a light theme (and so a future light theme has a test). */
+     be checked against a light theme. Applied at runtime because the fleet
+     tokens are declared once, in carino-ui.css. */
+  if (matchMedia('(prefers-color-scheme: light)').matches && document.documentElement.dataset.theme !== 'dark') {
+    const L = { 'bg':'#f6f6f4', 'bg-elev':'#ffffff', 'bg-card':'#ffffff', 'accent':'#b58105', 'accent-hi':'#a16207',
+      'accent-faint':'rgba(181,129,5,.07)', 'accent-dim':'rgba(181,129,5,.35)', 'border':'#e2e2de', 'border-hi':'#cfcfca',
+      'text':'#111', 'text-sec':'#4b4b4b', 'text-muted':'#8a8a8a', 'ok':'#16a34a', 'warn':'#b58105', 'err':'#dc2626' };
+    for (const k in L) document.documentElement.style.setProperty('--' + k, L[k]);
+  }
+</script>
+<style>
   @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) {
-      --bg:#f6f6f4; --bg-elev:#ffffff; --bg-card:#ffffff;
-      --accent:#b58105; --accent-hi:#a16207; --accent-faint:rgba(181,129,5,.07); --accent-dim:rgba(181,129,5,.35);
-      --border:#e2e2de; --border-hi:#cfcfca; --text:#111; --text-sec:#4b4b4b; --text-muted:#8a8a8a;
-      --ok:#16a34a; --warn:#b58105; --err:#dc2626;
-    }
     :root:not([data-theme="dark"]) .cc-root{ --chart-s2:#2563eb; --chart-s3:#7c3aed; --chart-s4:#db2777; --chart-s5:#0d9488; --chart-s6:#ea580c; }
   }
   body{padding:12px 16px;gap:10px;}
