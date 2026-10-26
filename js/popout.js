@@ -227,10 +227,13 @@ function readWidget(panelId) {
    quietly draws something nobody asked for. */
 function paintWidgetNote() {
   if (!el.poNote) return;
-  el.poNote.textContent = state.widgetNote || '';
+  // displays.js writes the sentence in English; the one with a widget name is matched back to its template.
+  const m = state.widgetNote && /^Showing the watchlist: this version has no "(.*)" widget\.$/.exec(state.widgetNote);
+  const note = m ? i18nT('Showing the watchlist: this version has no "{kind}" widget.').replace('{kind}', m[1]) : i18nT(state.widgetNote || '');
+  el.poNote.textContent = note;
   // The bar is one line and a docked strip is narrow, so the sentence is clipped
   // on screen and kept whole in the tooltip rather than being cut off outright.
-  if (state.widgetNote) el.poNote.title = state.widgetNote;
+  if (state.widgetNote) el.poNote.title = note;
   else el.poNote.removeAttribute('title');
   el.poNote.hidden = !state.widgetNote;
 }

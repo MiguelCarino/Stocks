@@ -442,7 +442,7 @@ export function mountChartPanel(host, opts = {}) {
     const q = safe(() => deps().quoteFor(sym), null);
     chart.setData({ bars: res.bars || [], symbol: sym, currency: (q && q.currency) || 'USD', interval: res.interval || st.i || (RANGE_BY_ID[st.r] || {}).interval,
       isDemo: !!res.isDemo, source: res.source || '', stale: res.stale, partial: res.partial, note: res.note, feed: res.feed, delayed: res.delayed });
-    if (!(res.bars || []).length) chart.setState(res.error ? 'error' : 'empty', res.error ? i18nT('Chart data could not be loaded.') + ' ' + res.error : '');
+    if (!(res.bars || []).length) chart.setState(res.error ? 'error' : 'empty', res.error ? i18nT('Chart data could not be loaded.') + ' ' + i18nT(res.error) : '');
     else chart.setState('ready');
     paintNote(res);
     paintBar();
@@ -466,8 +466,8 @@ export function mountChartPanel(host, opts = {}) {
 
   function paintNote(res) {
     let txt = '';
-    if (res.isDemo && res.error) txt = i18nT('Live bars were not available') + ' (' + res.error + ') — ' + i18nT('showing demo data instead.');
-    else if (res.stale && res.error) txt = i18nT('Refresh failed') + ' (' + res.error + ') — ' + i18nT('showing the last bars that loaded.');
+    if (res.isDemo && res.error) txt = i18nT('Live bars were not available') + ' (' + i18nT(res.error) + ') — ' + i18nT('showing demo data instead.');
+    else if (res.stale && res.error) txt = i18nT('Refresh failed') + ' (' + i18nT(res.error) + ') — ' + i18nT('showing the last bars that loaded.');
     else if (res.requestedInterval && res.interval && res.requestedInterval !== res.interval) txt = i18nT('This provider does not serve that interval for this range, so the chart uses') + ' ' + (INTERVAL_SHORT[res.interval] || res.interval) + '.';
     note.hidden = !txt;
     note.textContent = txt;

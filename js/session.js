@@ -345,7 +345,7 @@ function equitySession(ms, tz) {
   const nx = earlier(nextTradingMark(p, tz), nextShutFlip(p, state, tz));
 
   let detail = null;
-  if (state === 'holiday') detail = s.hol.name;
+  if (state === 'holiday') detail = String(s.hol.name).replace(/^(.*?)( \(observed\))?$/, (m, n, o) => i18nT(n) + (o ? ' ' + i18nT('(observed)') : ''));
   else if (s.trading && s.earlyClose) detail = i18nT('Early close') + ' 13:00';
   else if (!isTradeable) {
     const last = lastCloseLabel(p);

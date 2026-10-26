@@ -277,7 +277,7 @@ export function initAlertsUI(deps) {
     }
     const pid = safe(() => deps.routeQuote(sym), 'demo') || 'demo';
     const ext = deps.extHours[pid];
-    const label = deps.providerLabels[pid] || pid;
+    const label = i18nT(deps.providerLabels[pid] || pid);
     extOpt.disabled = ext === false;
     if (ext === false && sel.value === 'extended') sel.value = 'regular';
     note.textContent = ext === false

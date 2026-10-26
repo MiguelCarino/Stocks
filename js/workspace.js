@@ -54,6 +54,7 @@ const safe = (fn, fallback = null) => { try { return fn(); } catch (e) { return 
 // Fleet i18n bridge — i18n.js is a deferred classic script and this module runs
 // after it, but the guard keeps the file usable if the dictionary is absent.
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+const i18nF = (s, vars) => i18nT(s).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
 
 let idSeq = 0;
 function mintId(prefix) { return prefix + Date.now().toString(36) + (idSeq++).toString(36); }
@@ -1259,10 +1260,10 @@ export const workspace = {
     if (!model) return;
     const tab = model.tabs.find((t) => t.id === id);
     if (!tab) return;
-    const msg = tab.widgets.length
-      ? 'Delete the tab "' + tab.name + '" and its ' + tab.widgets.length + ' widget'
-        + (tab.widgets.length === 1 ? '' : 's') + '?'
-      : 'Delete the tab "' + tab.name + '"?';
+    const name = i18nT(tab.name), n = tab.widgets.length;
+    const msg = n
+      ? i18nF(n === 1 ? 'Delete the tab "{name}" and its {n} widget?' : 'Delete the tab "{name}" and its {n} widgets?', { name, n })
+      : i18nF('Delete the tab "{name}"?', { name });
     if (!safe(() => window.confirm(msg), true)) return;
     if (model.tabs.length <= 1) { this.reset(); return; }
     model.tabs = model.tabs.filter((t) => t.id !== id);

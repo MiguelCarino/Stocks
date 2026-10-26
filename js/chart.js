@@ -1140,7 +1140,7 @@ export function createChart(container, opts = {}) {
       ref.box.style.maxWidth = Math.max(80, L.plotR - 16) + 'px';
       if (pane.key === 'main') {
         setText(ref.sym, meta.symbol || '');
-        setText(ref.meta, [i18nT(INTERVAL_LABEL[meta.interval] || meta.interval || ''), meta.source].filter(Boolean).join(' · '));
+        setText(ref.meta, [i18nT(INTERVAL_LABEL[meta.interval] || meta.interval || ''), meta.source === 'demo' ? i18nT('Demo') : meta.source].filter(Boolean).join(' · '));
         const b = bars[idx];
         const prevC = idx > 0 && bars[idx - 1] ? bars[idx - 1].c : b ? b.o : null;
         for (const k of ['O', 'H', 'L', 'C']) setText(ref.ohlc[k], b ? fmtNum(b[k.toLowerCase()], pdOf(b.c)) : '—');
@@ -1176,17 +1176,19 @@ export function createChart(container, opts = {}) {
   }
 
   let chipSig = '';
+  // Provider notes are fixed English sentences, sometimes joined with '. ': translate each.
+  const noteT = (n) => String(n).split('. ').map((x) => i18nT(x)).join('. ');
   function paintChips() {
     const list = [];
     if (meta.isDemo) list.push(['demo', i18nT('Demo data'), i18nT('Synthetic prices for trying the tool — not market data.')]);
     if (meta.stale) list.push(['stale', i18nT('Stale'), i18nT('The provider could not refresh these bars, so the last good copy is shown.')]);
-    if (meta.partial) list.push(['partial', i18nT('Partial'), meta.note || i18nT('The provider returned less history or detail than this range asks for.')]);
-    else if (meta.note) list.push(['note', i18nT('Note'), meta.note]);
+    if (meta.partial) list.push(['partial', i18nT('Partial'), meta.note ? noteT(meta.note) : i18nT('The provider returned less history or detail than this range asks for.')]);
+    else if (meta.note) list.push(['note', i18nT('Note'), noteT(meta.note)]);
     if (meta.feed === 'iex') list.push(['feed', 'IEX', i18nT('Bars from the IEX exchange only — a small share of US volume, so highs, lows and volume can differ from the consolidated tape.')]);
     else if (meta.source && meta.source !== 'demo') {
       // The source names itself; its timeliness is the tooltip, because "Delayed"
       // on a feed that is real-time for some symbols would itself be a guess.
-      list.push(['src', SOURCE_LABEL[meta.source] || meta.source, i18nT('Bars from') + ' ' + (SOURCE_LABEL[meta.source] || meta.source) + (meta.delayed ? ' · ' + meta.delayed : '')]);
+      list.push(['src', SOURCE_LABEL[meta.source] || meta.source, i18nT('Bars from') + ' ' + (SOURCE_LABEL[meta.source] || meta.source) + (meta.delayed ? ' · ' + i18nT(meta.delayed) : '')]);
     }
     if (type === 'heikin') list.push(['ha', i18nT('Heikin-Ashi'), i18nT('Smoothed candles — not traded prices. The legend shows real OHLC.')]);
     if (logScale) list.push(['mode', i18nT('Log'), i18nT('Logarithmic price scale')]);

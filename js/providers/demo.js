@@ -32,6 +32,10 @@ import { classify, cryptoQuote, fxPair } from './assetclass.js';
 import { holidayInfo } from '../session.js';
 import { aggregate, trimToRange, rangeStart, zonedParts, zonedTimeToMs, US_TZ, isIntraday, utcYmd, defaultInterval, isInterval, ymd } from './candles.js';
 
+// UI-string translation via the site dictionary (i18n.js); identity when absent (and in Node tests).
+const i18nT = (s) => (typeof window !== 'undefined' && window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+const i18nF = (s, vars) => i18nT(s).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
+
 const DAY = 86400000;
 const MIN = 60000;
 const FULL_RES_DAYS = 100;   // sessions newer than this get a 1-minute bridge; older ones a coarse one
@@ -384,24 +388,28 @@ function demoNews(sym, limit, now) {
     const b = bars[i], prev = bars[i - 1];
     const pct = ((b.c - prev.c) / prev.c) * 100;
     if (Math.abs(pct) < P.vol * 100 * 0.6 && items.length >= 2) continue;
-    const dir = pct >= 0 ? 'rises' : 'falls';
-    const volWord = b.v == null || !avgV ? '' : b.v > avgV * 1.25 ? ' on heavier-than-usual volume' : b.v < avgV * 0.8 ? ' on lighter volume' : '';
+    const up = pct >= 0;
+    const vol = b.v == null || !avgV ? 0 : b.v > avgV * 1.25 ? 1 : b.v < avgV * 0.8 ? -1 : 0;
+    // Whole sentences as dictionary keys, so each language can order the words its own way.
+    const tpl = up
+      ? (vol > 0 ? '[Sample] {name} rises {pct}% on heavier-than-usual volume' : vol < 0 ? '[Sample] {name} rises {pct}% on lighter volume' : '[Sample] {name} rises {pct}%')
+      : (vol > 0 ? '[Sample] {name} falls {pct}% on heavier-than-usual volume' : vol < 0 ? '[Sample] {name} falls {pct}% on lighter volume' : '[Sample] {name} falls {pct}%');
     const ts = b.t + (P.cls === 'equity' ? 21 * 3600000 : 12 * 3600000);
     if (ts > now) continue;
     items.push({
       id: 'demo-' + sym + '-' + b.t,
       t: ts,
-      headline: `[Sample] ${name} ${dir} ${Math.abs(pct).toFixed(1)}%${volWord}`,
-      summary: 'Generated from the demo price series to show how news appears here. Not real news and not a real market event.',
-      source: 'Carino sample feed',
+      headline: i18nF(tpl, { name, pct: Math.abs(pct).toFixed(1) }),
+      summary: i18nT('Generated from the demo price series to show how news appears here. Not real news and not a real market event.'),
+      source: i18nT('Carino sample feed'),
       url: '',
     });
   }
   const ev = demoEvents(sym, now).earnings.find((e) => Date.parse(e.date) > now);
   if (ev && items.length < limit) items.push({
     id: 'demo-' + sym + '-earn-' + ev.date, t: now - 3 * 3600000,
-    headline: `[Sample] ${name} scheduled to report quarterly results on ${ev.date}`,
-    summary: 'Sample calendar note generated for demo mode.', source: 'Carino sample feed', url: '',
+    headline: i18nF('[Sample] {name} scheduled to report quarterly results on {date}', { name, date: ev.date }),
+    summary: i18nT('Sample calendar note generated for demo mode.'), source: i18nT('Carino sample feed'), url: '',
   });
   return items.sort((a, b) => b.t - a.t).slice(0, limit);
 }

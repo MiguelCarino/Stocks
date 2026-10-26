@@ -737,7 +737,7 @@ function scanForecast(syms) {
   const pid = safe(() => market.routeCandles(list[0], '1d', '1Y'), null);
   if (!pid) return null;
   const ms = safe(() => market.forecast(pid, list.length), null);
-  return { ms: Number.isFinite(ms) || ms === Infinity ? ms : 0, provider: pid, label: (PROVIDER_LABELS[pid] || pid) + ' ' + i18nT('free tier') };
+  return { ms: Number.isFinite(ms) || ms === Infinity ? ms : 0, provider: pid, label: i18nT(PROVIDER_LABELS[pid] || pid) + ' ' + i18nT('free tier') };
 }
 
 function saveDrawings(sym, arr) {
@@ -927,7 +927,7 @@ function renderRail() {
     const rm = el('button', 'icon-mini rr-x', '✕');
     rm.type = 'button';
     rm.title = i18nF('Remove {sym} from the watchlist', { sym });
-    rm.setAttribute('aria-label', 'Remove ' + sym);
+    rm.setAttribute('aria-label', i18nF('Remove {sym}', { sym }));
     rm.addEventListener('click', () => { store.removeSymbol(sym); refreshAll(); });
     row.appendChild(rm);
 
@@ -1115,7 +1115,7 @@ function renderDrawer() {
   const newsBox = sec('Recent news', null);
 
   const seriesId = safe(() => market.routeCandles(sym, '1d', '1Y'), 'demo') || 'demo';
-  body.appendChild(el('p', 'field-note', i18nT('Bars via') + ' ' + (PROVIDER_LABELS[seriesId] || seriesId) + '. '
+  body.appendChild(el('p', 'field-note', i18nT('Bars via') + ' ' + i18nT(PROVIDER_LABELS[seriesId] || seriesId) + '. '
     + i18nT('Double-click a symbol anywhere to open this panel; a single click only links the widgets.') + ' ' + i18nT('Delayed · not investment advice.')));
 
   drawerRefs = { sym, sessChip, sessNote, approx, stale, ruleBtn, ruleBadge, cells };
@@ -1150,7 +1150,7 @@ function refreshDrawer() {
   const armed = safe(() => store.rulesFor(sym).filter((x) => x.armed).length, 0);
   setTxt(r.ruleBadge, armed ? String(armed) : '');
   r.ruleBadge.hidden = !armed;
-  r.ruleBtn.title = armed ? armed + ' ' + i18nT(armed === 1 ? 'armed rule on' : 'armed rules on') + ' ' + sym : i18nT('No rules on') + ' ' + sym + ' ' + i18nT('yet');
+  r.ruleBtn.title = armed ? armed + ' ' + i18nT(armed === 1 ? 'armed rule on' : 'armed rules on') + ' ' + sym : i18nF('No rules on {sym} yet', { sym });
   const c = r.cells;
   const uncov = !q && state.uncovered.has(sym);
   setTxt(c.last, q ? fmtPrice(q.price, q.currency, fxOpts(sym)) : uncov ? i18nT('Not covered') : '—');
@@ -1169,7 +1169,7 @@ function refreshDrawer() {
   setTxt(c.volume, q && q.volume != null ? fmtInt(q.volume) : '—');
   const prof = store.profiles[sym];
   setTxt(c.exchange, (prof && prof.exchange) || '—');
-  setTxt(c.sector, (prof && prof.sector) || '—');
+  setTxt(c.sector, prof && prof.sector ? i18nT(prof.sector) : '—');
   if (drawerPanel) drawerPanel.tick();
 }
 
@@ -1479,7 +1479,7 @@ function updateProviderConfig() {
   for (const box of document.querySelectorAll('.provider-config')) box.hidden = box.dataset.provider !== sel;
   const universal = $('setUniversal').checked;
   $('providerModeNote').textContent = universal
-    ? i18nF('Every symbol uses {provider}.', { provider: PROVIDER_LABELS[sel] || sel })
+    ? i18nF('Every symbol uses {provider}.', { provider: i18nT(PROVIDER_LABELS[sel] || sel) })
     : i18nT('Auto-route: equities use the selected stock provider, crypto uses CoinGecko (keyless), FX uses Twelve Data. Symbols are grouped so each provider gets one batched call — add keys for whichever providers you use.');
 }
 function openSettings(scrollTo) {
@@ -1627,14 +1627,14 @@ function renderQuota() {
   bar.classList.toggle('hot', pct >= 80);
 
   $('quotaTxt').textContent = worst && worst.cap
-    ? `${PROVIDER_LABELS[worst.id] || worst.id} ${worst.used}/${worst.cap} ` + i18nT('per min')
+    ? `${i18nT(PROVIDER_LABELS[worst.id] || worst.id)} ${worst.used}/${worst.cap} ` + i18nT('per min')
     : i18nF('{n} calls in the last minute', { n: totalMin });
   const others = Object.keys(by).length;
   $('quotaSub').textContent = totalHour
     ? i18nF('{n} in the last hour', { n: totalHour }) + (others > 1 ? ' · ' + i18nF('{n} providers', { n: others }) : '')
     : '';
   box.title = Object.entries(by)
-    .map(([id, v]) => `${PROVIDER_LABELS[id] || id}: ${perMin(v)}/min${RATE_CEILING[id] ? ' of ' + RATE_CEILING[id] : ''}`)
+    .map(([id, v]) => `${i18nT(PROVIDER_LABELS[id] || id)}: ` + (RATE_CEILING[id] ? i18nF('{n}/min of {cap}', { n: perMin(v), cap: RATE_CEILING[id] }) : i18nF('{n}/min', { n: perMin(v) })))
     .join('\n') || i18nT('No provider calls recorded.');
 }
 
@@ -1816,7 +1816,7 @@ function fillScreenPicker(list) {
 }
 
 function screenLabel(id) {
-  if (!id) return 'default position';
+  if (!id) return i18nT('default position');
   const s = state.screens.find((x) => x.id === id);
   return s ? (s.label || s.id) : id;
 }
@@ -1858,8 +1858,8 @@ function renderDisplays() {
       const row = el('div', 'disp-row');
       row.append(el('span', 'dr-name', panel ? i18nT(panel.label) : p.panelId));
       row.append(el('span', 'tag ' + (p.alive ? 'live' : 'closed'), i18nT(p.mode === 'pip' ? 'Picture-in-Picture' : 'Window')));
-      row.append(el('span', 'dr-where', p.mode === 'pip' ? 'browser-placed' : screenLabel(p.screenId)));
-      if (p.placed === false) row.append(el('span', 'tag stale', 'placement ignored'));
+      row.append(el('span', 'dr-where', p.mode === 'pip' ? i18nT('browser-placed') : screenLabel(p.screenId)));
+      if (p.placed === false) row.append(el('span', 'tag stale', i18nT('placement ignored')));
       const x = el('button', 'cs-btn', i18nT('Close'));
       x.addEventListener('click', () => { displays.close(p.panelId); renderDisplays(); });
       row.append(el('span', 'spacer'), x);
@@ -1875,7 +1875,7 @@ function renderDisplays() {
       const row = el('div', 'disp-row');
       row.append(el('span', 'dr-name', panel ? i18nT(panel.label) : p.panelId));
       row.append(el('span', 'tag closed', i18nT('Detached')));
-      row.append(el('span', 'dr-where', 'opened before this page loaded'));
+      row.append(el('span', 'dr-where', i18nT('opened before this page loaded')));
       const re = el('button', 'cs-btn', i18nT('Re-open'));
       re.title = i18nT('Reconnect to the panel window if it is still open, or open it again if it is not.');
       re.addEventListener('click', () => {
@@ -2182,7 +2182,7 @@ function renderProviderPanel() {
     const caps = PROVIDER_CAPS[r.id] || {};
     const tr = el('tr');
     const name = el('th', 'prov-name'); name.scope = 'row';
-    name.append(el('strong', null, PROVIDER_LABELS[r.id] || r.label || r.id));
+    name.append(el('strong', null, i18nT(PROVIDER_LABELS[r.id] || r.label || r.id)));
     if (caps.quality) name.append(el('span', 'prov-q', i18nT(caps.quality)));
     if (r.note) name.append(el('span', 'prov-q', i18nT('Free tier') + ': ' + i18nT(r.note)));
     const err = r.lastError;

@@ -39,6 +39,9 @@ import { fmtPrice, fmtMove, fmtPct, fmtNum, fmtVolume, fmtTime, fmtAge, priceKin
 
 // UI-string translation via the site dictionary (i18n.js); identity when absent.
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+const i18nF = (s, vars) => i18nT(s).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
+// The built-in sample source shows as a translated word; real provider ids are names.
+const srcName = (id) => (id === 'demo' ? i18nT('Demo') : id);
 
 const DASH = '—';
 const STALE_FLOOR_MS = 90000;   // matches app.js: never call a quote stale inside 90s
@@ -173,7 +176,7 @@ function validTable(t) {
 function stubEntry(id, label, desc) {
   return {
     id, label, desc, needsSymbol: false, minW: 4, minH: 3, defaultW: 12, defaultH: 5,
-    create(host) { return placeholder(id, host, label + ' unavailable', 'The table renderer did not load.'); },
+    create(host) { return placeholder(id, host, i18nT(label) + ' · ' + i18nT('unavailable'), i18nT('The table renderer did not load.')); },
   };
 }
 
@@ -444,8 +447,8 @@ function paintFrameAge(node, ctx) {
   const ms = Number(ctx && ctx.staleMs);
   if (!Number.isFinite(ms) || ms <= 0) { setHidden(node, true); return; }
   setHidden(node, false);
-  setText(node, 'Frame ' + fmtAge(ms) + ' old');
-  setAttr(node, 'title', 'The whole board is this far behind — the app has not completed a poll since.');
+  setText(node, i18nT('Frame') + ' ' + fmtAge(ms) + ' ' + i18nT('old'));
+  setAttr(node, 'title', i18nT('The whole board is this far behind — the app has not completed a poll since.'));
 }
 
 function sectionHead(text) { return el('div', 'wg-sec rail-lbl', text); }
@@ -573,7 +576,7 @@ function paintCard(ref, sym, ctx) {
   if (ref.sparkSig !== sig) { ref.sparkSig = sig; ref.spark.innerHTML = sparkline(pts); }
 
   paintRange(ref, q);
-  setText(ref.src, q ? q.source : DASH);
+  setText(ref.src, q ? srcName(q.source) : DASH);
   setText(ref.ts, q ? i18nT('as of') + ' ' + fmtTime(q.ts) : '');
 }
 
@@ -720,7 +723,7 @@ function createQuote(host, ctx) {
     }
 
     paintTags(tags, sym ? tagParts(cur, sym) : []);
-    setText(src, q ? q.source : '');
+    setText(src, q ? srcName(q.source) : '');
     // Volume is the one extra field worth the space on a glance panel: it is what
     // says whether the price above it was set by a market or by one small print.
     setText(vol, q && q.volume != null ? i18nT('Vol') + ' ' + fmtVolume(q.volume) : '');
@@ -813,7 +816,7 @@ function paintTapeItem(ref, sym, ctx) {
   // marker only has to be noticeable.
   const stale = staleMsOf(ctx, sym);
   setHidden(ref.mark, !stale);
-  if (stale) setAttr(ref.mark, 'title', 'Stale ' + fmtAge(stale) + ' — this quote’s timestamp has stopped advancing.');
+  if (stale) setAttr(ref.mark, 'title', i18nF('Stale {age} — this quote’s timestamp has stopped advancing.', { age: fmtAge(stale) }));
 }
 
 /* ---- alerts --------------------------------------------------------------- */
@@ -858,7 +861,7 @@ function createAlerts(host, ctx) {
 
     const off = all.length - armed.length;
     setHidden(disarmed, off <= 0);
-    if (off > 0) setText(disarmed, off + (off === 1 ? ' rule is disarmed and will not fire.' : ' rules are disarmed and will not fire.'));
+    if (off > 0) setText(disarmed, off + ' ' + i18nT(off === 1 ? 'rule is disarmed and will not fire.' : 'rules are disarmed and will not fire.'));
 
     const log = safe(() => (Array.isArray(store.alertlog) ? store.alertlog : []), []);
     const rows = log.slice(-8).reverse();
@@ -912,9 +915,9 @@ function logRow(a, ctx) {
   row.appendChild(el('span', 'log-time', fmtTime(a && a.ts)));
   if (a && (a.sessionLabel || a.session)) {
     const st = el('span', 'tag sess' + (a.approx ? ' approx' : ''), a.sessionLabel || a.session);
-    st.title = a.approx
+    st.title = i18nT(a.approx
       ? 'Market session when the rule fired — the calendar could not confirm this date.'
-      : 'Market session when the rule fired.';
+      : 'Market session when the rule fired.');
     row.appendChild(st);
   }
   row.appendChild(el('span', 'log-text', (a && a.text) || ''));
@@ -924,7 +927,7 @@ function logRow(a, ctx) {
     // left the board, and '$1.0848' is a ratio dressed as an amount of dollars.
     const snap = el('span', 'log-snap amount', fmtPrice(a.quote.price, a.quote.currency, priceOpts(ctx, a.symbol))
       + (a.quote.changePct != null ? ' (' + fmtNum(a.quote.changePct) + '%)' : ''));
-    snap.title = 'Quote at the moment the rule fired' + (a.quote.source ? ' · ' + a.quote.source : '');
+    snap.title = i18nT('Quote at the moment the rule fired') + (a.quote.source ? ' · ' + srcName(a.quote.source) : '');
     row.appendChild(snap);
   }
   return row;
@@ -993,8 +996,7 @@ function buildSessRow(id) {
   const detail = el('span', 'wg-sess-detail', '');
   const approx = el('span', 'tag approx', i18nT('approx'));
   approx.hidden = true;
-  approx.title = 'The holiday table is authoritative through ' + HOLIDAY_HORIZON
-    + '; this date is rule-derived and unconfirmed, so treat the boundary as an estimate.';
+  approx.title = i18nF('The holiday table is authoritative through {year}; this date is rule-derived and unconfirmed, so treat the boundary as an estimate.', { year: HOLIDAY_HORIZON });
   root.append(mkt, state, count, nextEl, detail, approx);
   return { root, state, count, next: nextEl, detail, approx };
 }

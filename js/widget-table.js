@@ -25,6 +25,9 @@ import { helpIcon } from './learn.js';
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 // Fleet i18n bridge — guarded so the module still works without the dictionary.
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+const i18nF = (s, vars) => i18nT(s).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
+// The built-in sample source shows as a translated word; real provider ids are names.
+const srcName = (id) => (id === 'demo' ? i18nT('Demo') : id);
 
 // Wraps a host-supplied callback. A widget must not blank itself because the
 // container handed it a function that throws on one symbol.
@@ -61,7 +64,7 @@ const COL_DEFS = [
     },
     patch: (td, r, refs) => {
       setText(refs.btn, r.sym);
-      setAttr(refs.btn, 'title', 'Link ' + r.sym + ' to this workspace');
+      setAttr(refs.btn, 'title', i18nF('Link {sym} to this workspace', { sym: r.sym }));
     },
   },
   {
@@ -75,10 +78,10 @@ const COL_DEFS = [
     id: 'last', label: 'Last', desc: 'Most recent price the provider reported.',
     num: true, width: '11ch', amount: true,
     sort: (r) => q(r, 'price'),
-    text: (r) => (r.uncovered ? 'Not covered' : r.q ? fmtPrice(r.q.price, r.q.currency, { fx: r.fx, kind: r.kind }) : '—'),
+    text: (r) => (r.uncovered ? i18nT('Not covered') : r.q ? fmtPrice(r.q.price, r.q.currency, { fx: r.fx, kind: r.kind }) : '—'),
     title: (r) => (r.uncovered
-      ? 'The provider handling this symbol returned no quote for it.'
-      : r.q ? 'As of ' + fmtTime(r.q.ts) + ' · ' + r.q.source : ''),
+      ? i18nT('The provider handling this symbol returned no quote for it.')
+      : r.q ? i18nF('As of {time}', { time: fmtTime(r.q.ts) }) + ' · ' + srcName(r.q.source) : ''),
   },
   {
     id: 'chg', label: 'Chg', desc: 'Absolute change against the baseline in the Basis column.',
@@ -147,9 +150,8 @@ const COL_DEFS = [
       const left = have ? r.rng + '%' : '0%';
       if (refs.mark.style.left !== left) refs.mark.style.left = left;
       setAttr(td, 'title', have
-        ? 'Last is ' + fmtNum(r.rng, 0) + '% of the way from ' + fmtMove(r.q.low, r.q.price, r)
-          + ' to ' + fmtMove(r.q.high, r.q.price, r)
-        : 'No high/low reported for this symbol.');
+        ? i18nF('Last is {pct}% of the way from {low} to {high}', { pct: fmtNum(r.rng, 0), low: fmtMove(r.q.low, r.q.price, r), high: fmtMove(r.q.high, r.q.price, r) })
+        : i18nT('No high/low reported for this symbol.'));
     },
   },
   {
@@ -175,8 +177,8 @@ const COL_DEFS = [
     id: 'sector', label: 'Sector', desc: 'Industry classification from the cached profile.',
     width: '14ch',
     sort: (r) => (r.prof && r.prof.sector ? String(r.prof.sector).toUpperCase() : null),
-    text: (r) => (r.prof && r.prof.sector) || '—',
-    title: (r) => (r.prof && r.prof.sector) || '',
+    text: (r) => (r.prof && r.prof.sector ? i18nT(r.prof.sector) : '—'),
+    title: (r) => (r.prof && r.prof.sector ? i18nT(r.prof.sector) : ''),
   },
   {
     id: 'basis', label: 'Basis', desc: 'What Chg and Chg% are actually measured against.',
@@ -215,7 +217,7 @@ const COL_DEFS = [
     id: 'source', label: 'Source', desc: 'Which provider answered for this symbol.',
     width: '10ch',
     sort: (r) => (r.q && r.q.source ? String(r.q.source).toUpperCase() : null),
-    text: (r) => (r.q && r.q.source) || '—',
+    text: (r) => (r.q && r.q.source ? srcName(r.q.source) : '—'),
   },
   {
     id: 'asof', label: 'As of', desc: 'When this figure is from — the print itself where the provider says so, otherwise our fetch.',
@@ -226,10 +228,10 @@ const COL_DEFS = [
     // the price did — so it is marked rather than passed off as the print time.
     text: (r) => (r.q ? fmtTime(r.q.ts) + (r.q.tsSource === 'provider' ? '' : '~') : '—'),
     title: (r) => (!r.q ? '' : r.stale
-      ? 'This quote’s timestamp has not advanced for ' + fmtAge(r.frozen) + ' while the market is tradeable.'
+      ? i18nF('This quote’s timestamp has not advanced for {age} while the market is tradeable.', { age: fmtAge(r.frozen) })
       : r.q.tsSource === 'provider'
-        ? 'Timestamp reported by ' + r.q.source + ' for the print itself.'
-        : r.q.source + ' does not timestamp its quotes, so this is when we fetched — not when the price moved.'),
+        ? i18nF('Timestamp reported by {source} for the print itself.', { source: srcName(r.q.source) })
+        : i18nF('{source} does not timestamp its quotes, so this is when we fetched — not when the price moved.', { source: srcName(r.q.source) })),
     mark: (td, r) => {
       td.classList.toggle('wt-warn', !!r.stale);
       td.classList.toggle('wt-approx', !!(r.q && r.q.tsSource !== 'provider'));
@@ -296,7 +298,7 @@ function createTable(host, ctx0) {
 
   const scroll = el('div', 'wt-scroll');
   const table = el('table', 'wt-table');
-  const caption = el('caption', 'wt-cap', 'Watchlist quotes — sortable, one row per symbol');
+  const caption = el('caption', 'wt-cap', i18nT('Watchlist quotes — sortable, one row per symbol'));
   const colgroup = el('colgroup');
   const thead = el('thead');
   const headRow = el('tr');
@@ -610,7 +612,7 @@ function staleThreshold(ctx) {
 
 function buildColMenu(set) {
   const box = el('details', 'wt-cols');
-  const sum = el('summary', 'wt-colsum', 'Columns');
+  const sum = el('summary', 'wt-colsum', i18nT('Columns'));
   const menu = el('div', 'wt-colmenu');
   const list = el('div', 'wt-collist');
   const boxes = new Map();

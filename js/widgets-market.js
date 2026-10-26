@@ -969,7 +969,7 @@ export function renderFundamentals(box, f, opts = {}) {
   if (!n) { box.appendChild(el('p', 'field-note', i18nT('Your provider returned no figures for this symbol.'))); return; }
   box.appendChild(grid);
   const asOf = f.asOf ? (typeof f.asOf === 'number' ? ymd(f.asOf) : String(f.asOf).slice(0, 10)) : '';
-  box.appendChild(el('p', 'field-note', i18nT('Source') + ': ' + (f.source || '—') + (asOf ? ' · ' + i18nT('as of') + ' ' + asOf : '') + ' · ' + i18nT('Figures can lag company filings.')));
+  box.appendChild(el('p', 'field-note', i18nT('Source') + ': ' + (f.source === 'demo' ? i18nT('Demo') : f.source || '—') + (asOf ? ' · ' + i18nT('as of') + ' ' + asOf : '') + ' · ' + i18nT('Figures can lag company filings.')));
 }
 
 export function renderEvents(box, ev, opts = {}) {

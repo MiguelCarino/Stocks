@@ -264,6 +264,27 @@ export function extractKeys() {
     if (/workspace\.js$/.test(rel)) for (const m of src.matchAll(/\bT\(\s*'([^']+)'/g)) add(keys, m[1], rel + ' (tab)');
     if (/app\.js$/.test(rel)) for (const m of src.matchAll(/\badd\(\s*'([A-Z][^']*)'\s*,/g)) add(keys, m[1], rel + ' (palette group)');
     for (const line of src.split('\n')) if (/baselineNote\s*:/.test(line)) for (const m of line.matchAll(/'([^'\\]*(?:\\.[^'\\]*)*)'/g)) add(keys, unescape(m[1]), rel + ' (baselineNote)');
+    // Parameter labels of alert types and indicators: p('fast', 'Fast period', ...), shown in the editors.
+    if (/(alerttypes|indicators)\.js$/.test(rel)) for (const m of src.matchAll(/\b[pP]\(\s*'\w+'\s*,\s*'([^']+)'/g)) add(keys, m[1], rel + ' (param)');
+    // Validation messages and import notes the ledger and import dialog show through i18nT.
+    if (/(portfolio|csvimport)\.js$/.test(rel)) {
+      for (const m of src.matchAll(/\b(?:error|message)\s*:\s*'((?:\\.|[^'\\])*)'/g)) add(keys, unescape(m[1]), rel + ' (message)');
+      for (const m of src.matchAll(/warnings\.push\(\s*'((?:\\.|[^'\\])*)'/g)) add(keys, unescape(m[1]), rel + ' (warning)');
+      for (const m of src.matchAll(/\bnotes\s*:\s*\[([\s\S]*?)\]/g)) for (const v of m[1].matchAll(/'((?:\\.|[^'\\])*)'/g)) add(keys, unescape(v[1]), rel + ' (notes)');
+    }
+    // Holiday names the session widget shows as the closed day's detail.
+    if (/session\.js$/.test(rel)) for (const m of src.matchAll(/\b(?:closed|half)\([^\n']*'([^']+?)'/g)) add(keys, m[1], rel + ' (holiday)');
+    if (/session\.js$/.test(rel)) for (const m of src.matchAll(/\{\s*name:\s*'([^']+)'/g)) add(keys, m[1], rel + ' (holiday)');
+    // Demo-mode news: whole-sentence templates picked by a ternary.
+    if (/providers\/demo\.js$/.test(rel)) for (const m of src.matchAll(/'(\[Sample\][^']*)'/g)) add(keys, m[1], rel + ' (demo news)');
+    // Provider timeliness and history notes, and the fixed error texts the chart shows.
+    if (rel.startsWith('js/providers/')) {
+      for (const m of src.matchAll(/\bdelayed\s*:\s*'([^']+)'/g)) add(keys, m[1], rel + ' (delayed)');
+      for (const m of src.matchAll(/\bnote\s*:\s*\[([^\]]*)\]/g)) for (const v of m[1].matchAll(/'([^']+)'/g)) add(keys, v[1], rel + ' (note)');
+      for (const m of src.matchAll(/\bnote\s*:\s*'([^']+)'/g)) add(keys, m[1], rel + ' (note)');
+      for (const m of src.matchAll(/apiError\(\s*'\w+'\s*,\s*'([^']+)'\s*[,)]/g)) add(keys, m[1], rel + ' (error)');
+      for (const m of src.matchAll(/\berror\s*:\s*'([^']+)'/g)) add(keys, m[1], rel + ' (error)');
+    }
 
     // 3b. Loose literals (see looseLiterals).
     if (!isProvider && !/csvimport\.js$/.test(rel)) for (const t of looseLiterals(src)) add(keys, t, rel + ' (loose)');
@@ -290,6 +311,11 @@ export function extractKeys() {
     const re = /<([a-z0-9]+)\b[^>]*\bdata-i18n\b[^>]*>([\s\S]*?)<\/\1>/g;
     let m;
     while ((m = re.exec(html))) add(keys, m[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'), f);
+  }
+  // Demo sectors: the heatmap, table and calculator show them through i18nT.
+  for (const tk of Object.values(JSON.parse(fs.readFileSync(path.join(ROOT, 'data/demo.json'), 'utf8')).tickers || {})) {
+    const sec = tk && (tk.sector || (tk.profile && tk.profile.sector));
+    if (sec) add(keys, sec, 'data/demo.json (sector)');
   }
   // Bundled universes: their names and notes are shown in the screener, heatmap
   // and movers pickers.

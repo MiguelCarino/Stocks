@@ -28,6 +28,7 @@ const priceTxt = (v, sym) => {
 };
 
 const i18nT = (s) => (window.CarinoI18n ? window.CarinoI18n.t(s) : s);
+const i18nF = (s, vars) => i18nT(s).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const safe = (fn, fb = null) => { try { return fn(); } catch (e) { return fb; } };
@@ -38,6 +39,21 @@ const TYPE_LABEL = {
   buy: 'Buy', sell: 'Sell', dividend: 'Dividend', fee: 'Fee', split: 'Split', deposit: 'Deposit',
   withdraw: 'Withdrawal', interest: 'Interest', tax: 'Tax',
 };
+// Validation and import messages from portfolio.js / csvimport.js. Fixed ones
+// are dictionary keys; the few that carry a value are matched back to a template.
+const ORDER_TXT = { 'month/day/year': 'month/day/year', 'day/month/year': 'day/month/year' };
+function msgT(m) {
+  const s = String(m == null ? '' : m);
+  let x;
+  if ((x = /^Unknown type "(.*)"$/.exec(s))) return i18nF('Unknown type "{type}"', { type: x[1] });
+  if ((x = /^Unknown preset "(.*)"$/.exec(s))) return i18nF('Unknown preset "{name}"', { name: x[1] });
+  if ((x = /^(\w+) without an amount$/.exec(s)) && TYPE_LABEL[x[1].toLowerCase()]) return i18nF('{type} without an amount', { type: i18nT(TYPE_LABEL[x[1].toLowerCase()]) });
+  if ((x = /^Sell of (.+) exceeds the (.+) held; the extra (.+) was ignored$/.exec(s))) return i18nF('Sell of {qty} exceeds the {held} held; the extra {extra} was ignored', { qty: x[1], held: x[2], extra: x[3] });
+  if ((x = /^Split for (.+): no shares held before it in this file, enter the ratio manually$/.exec(s))) return i18nF('Split for {sym}: no shares held before it in this file, enter the ratio manually', { sym: x[1] });
+  if ((x = /^Day\/month order is ambiguous in this file; assumed (.+)\.$/.exec(s)) && ORDER_TXT[x[1]]) return i18nF('Day/month order is ambiguous in this file; assumed {order}.', { order: i18nT(ORDER_TXT[x[1]]) });
+  if ((x = /^Dates look like (.+), not this broker's usual order\.$/.exec(s)) && ORDER_TXT[x[1]]) return i18nF('Dates look like {order}, not this broker\'s usual order.', { order: i18nT(ORDER_TXT[x[1]]) });
+  return i18nT(s);
+}
 // Which inputs each type uses. Everything else is hidden, so a dividend form
 // cannot be saved with a stray quantity in it.
 const FIELDS = {
@@ -162,7 +178,7 @@ export function initLedgerUI(deps) {
     issues.textContent = '';
     if (errs.length) {
       issues.appendChild(el('div', 'rail-lbl', i18nT('Needs attention')));
-      for (const e of errs.slice(0, 12)) issues.appendChild(el('p', 'field-note warn-note', [e.date, e.symbol, i18nT(e.message)].filter(Boolean).join(' · ')));
+      for (const e of errs.slice(0, 12)) issues.appendChild(el('p', 'field-note warn-note', [e.date, e.symbol, msgT(e.message)].filter(Boolean).join(' · ')));
     }
     renderRealized(pf);
   }
@@ -464,7 +480,7 @@ export function initLedgerUI(deps) {
 
     const warn = $('impWarn');
     warn.textContent = '';
-    for (const w of res.warnings || []) warn.appendChild(el('p', 'field-note warn-note', i18nT(w)));
+    for (const w of res.warnings || []) warn.appendChild(el('p', 'field-note warn-note', msgT(w)));
 
     const body = $('impPrevBody');
     body.textContent = '';
@@ -488,7 +504,7 @@ export function initLedgerUI(deps) {
 
     const errs = $('impErrs');
     errs.textContent = '';
-    for (const e of (res.errors || []).slice(0, 25)) errs.appendChild(el('p', 'field-note warn-note', (e.row ? i18nT('Row') + ' ' + e.row + ': ' : '') + i18nT(e.message)));
+    for (const e of (res.errors || []).slice(0, 25)) errs.appendChild(el('p', 'field-note warn-note', (e.row ? i18nT('Row') + ' ' + e.row + ': ' : '') + msgT(e.message)));
     if ((res.errors || []).length > 25) errs.appendChild(el('p', 'field-note', '… ' + ((res.errors.length - 25)) + ' ' + i18nT('more errors')));
     // Skip reasons grouped: "12 × Currency conversion" reads better than twelve lines.
     const skipBy = new Map();
