@@ -1637,6 +1637,8 @@ export function createChart(container, opts = {}) {
   const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
   const onScheme = () => schedule();
   if (mq && mq.addEventListener) mq.addEventListener('change', onScheme);
+  // The fleet's Gold & Black / Colourful switch: the tokens above change, so redraw.
+  if (typeof window !== 'undefined') window.addEventListener('carino:themechange', onScheme);
 
   /* ---- public API ------------------------------------------------------------------------------ */
   function setState(s, msg) {
@@ -1734,6 +1736,7 @@ export function createChart(container, opts = {}) {
       if (raf) cancelAnimationFrame(raf);
       if (ro) ro.disconnect();
       if (mq && mq.removeEventListener) mq.removeEventListener('change', onScheme);
+      if (typeof window !== 'undefined') window.removeEventListener('carino:themechange', onScheme);
       document.removeEventListener('pointerdown', onDocDown, true);
       clearTimeout(longTimer);
       root.remove();

@@ -27,10 +27,27 @@
   <script type="application/json" id="carino-head-i18n">{"es": {"title": "Seguimiento de acciones, portafolio y alertas — Carino Stocks", "desc": "Lista de seguimiento, portafolio y alertas de mercados en tu navegador. Tus claves, tu dispositivo. Solo monitoreo, nunca asesoría."}, "pt-BR": {"title": "Acompanhar ações, carteira e alertas de preço — Carino Stocks", "desc": "Lista de acompanhamento, carteira e alertas de mercado no navegador. Suas chaves, seu dispositivo. Apenas monitoramento, nunca recomendação."}, "ja": {"title": "株価ウォッチリスト・アラート — Carino Stocks", "desc": "ブラウザ完結の株式ウォッチリスト、ポートフォリオ、アラート。APIキーも端末も自分のもの。監視専用で投資助言はなし。"}, "ru": {"title": "Список акций, портфель и ценовые оповещения — Carino Stocks", "desc": "Список наблюдения, портфель и оповещения по рынкам прямо в браузере. Ваши ключи, ваше устройство. Только мониторинг, никаких советов."}}</script>
   <script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebApplication", "name": "Stocks", "url": "https://stocks.carino.systems/", "description": "Client-side markets watchlist, portfolio and alerts. Your keys, your device. Monitoring only, never advice.", "operatingSystem": "Any (runs in a web browser)", "isAccessibleForFree": true, "author": {"@type": "Person", "name": "Miguel Cariño", "url": "https://carino.systems/"}}</script>
   <!-- /carino:head -->
-  <meta name="theme-color" content="#050505" />
   <!-- Manifest only, deliberately no service worker: a hand-maintained precache
        list on a no-build static host strands users on a stale bundle. -->
   <link rel="manifest" href="manifest.webmanifest" />
+  <!-- Theme before first paint, so neither theme flashes the other:
+       ?theme=gold|color (review links; not stored) > carino-theme cookie
+       (shared across *.carino.systems) > localStorage > Gold & Black. -->
+  <meta name="theme-color" content="#050505" id="carinoThemeColor">
+  <script>
+  (function () {
+    var d = document.documentElement, t = null;
+    function pick(v) { return v === 'gold' ? 'gold' : (v === 'color' || v === 'colour') ? 'color' : null; }
+    try { t = pick(new URLSearchParams(location.search).get('theme')); } catch (e) {}
+    if (!t) { try { var m = document.cookie.match(/(?:^|;\s*)carino-theme=([^;]*)/); if (m) t = pick(decodeURIComponent(m[1])); } catch (e) {} }
+    if (!t) { try { t = pick(localStorage.getItem('carino-theme')); } catch (e) {} }
+    t = t || 'gold';
+    d.setAttribute('data-carino-theme', t);
+    var dark = d.getAttribute('data-theme') !== 'light' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    var meta = document.getElementById('carinoThemeColor');
+    if (meta) meta.content = t === 'gold' ? '#050505' : (dark ? '#0e1420' : '#eef3fc');
+  })();
+  </script>
   <link rel="stylesheet" href="fonts/carino-fonts.css" />
   <link rel="stylesheet" href="carino-ui.css" />
   <link rel="stylesheet" href="css/stocks.css" />
@@ -40,6 +57,49 @@
   <!-- The chart engine and the education layer style their own components. -->
   <link rel="stylesheet" href="css/chart.css" />
   <link rel="stylesheet" href="css/learn.css" />
+  <!-- Colourful theme + the switch; nothing applies until data-carino-theme="color". -->
+  <link rel="stylesheet" href="carino-theme.css" />
+  <style>
+    /* Colourful: carino-theme.css remaps the tokens, so everything that reads
+       one follows (the chart engine reads them at draw time and redraws on
+       carino:themechange); these are the values in css/*.css written for black. */
+    :root[data-carino-theme="color"]{--accent-hi:var(--ct-accent-strong);--border-hi:var(--border);}
+    /* series colours: the theme's category strokes, which hold on white */
+    :root[data-carino-theme="color"] .cc-root{--chart-s2:var(--ct-red);--chart-s3:var(--ct-purple);--chart-s4:var(--ct-pink);--chart-s5:var(--ct-teal);--chart-s6:var(--ct-amber);}
+    :root[data-carino-theme="color"] .cmp-c1,:root[data-carino-theme="color"] .al-c1{--cmp:var(--ct-red);--al:var(--ct-red);}
+    :root[data-carino-theme="color"] .cmp-c2,:root[data-carino-theme="color"] .al-c2{--cmp:var(--ct-purple);--al:var(--ct-purple);}
+    :root[data-carino-theme="color"] .cmp-c3,:root[data-carino-theme="color"] .al-c3{--cmp:var(--ct-pink);--al:var(--ct-pink);}
+    :root[data-carino-theme="color"] .cmp-c4,:root[data-carino-theme="color"] .al-c4{--cmp:var(--ct-teal);--al:var(--ct-teal);}
+    :root[data-carino-theme="color"] .cmp-c5,:root[data-carino-theme="color"] .al-c5{--cmp:var(--ct-amber);--al:var(--ct-amber);}
+    :root[data-carino-theme="color"] body{background-image:var(--stage-grad);}
+    :root[data-carino-theme="color"] .market-strip{background:var(--ct-glass);}
+    :root[data-carino-theme="color"] .rule-badge,:root[data-carino-theme="color"] .learn-dots .on button{color:var(--ct-on-accent);}
+    /* status tints: the green/red/amber of the black theme, as the tokens */
+    :root[data-carino-theme="color"] .sess-chip[data-state="open"],:root[data-carino-theme="color"] .tag.live,:root[data-carino-theme="color"] .led-t-buy,
+    :root[data-carino-theme="color"] .imp-n.ok,:root[data-carino-theme="color"] .prov-st.ok,:root[data-carino-theme="color"] .wg-cal-kind.dividend,
+    :root[data-carino-theme="color"] body[data-level="beginner"] .lvl-btn,:root[data-carino-theme="color"] .lgi-lv.lv-beginner{border-color:color-mix(in srgb,var(--ok) 40%,transparent);}
+    :root[data-carino-theme="color"] .sess-chip[data-state="open"] .sc-dot{box-shadow:none;}
+    :root[data-carino-theme="color"] .learn-card.done{border-color:color-mix(in srgb,var(--ok) 35%,transparent);}
+    :root[data-carino-theme="color"] .sess-conflict,:root[data-carino-theme="color"] .led-t-sell,:root[data-carino-theme="color"] .imp-n.err,
+    :root[data-carino-theme="color"] .prov-st.bad,:root[data-carino-theme="color"] .wt-frame,:root[data-carino-theme="color"] .wk-w-error{border-color:color-mix(in srgb,var(--err) 45%,transparent);}
+    :root[data-carino-theme="color"] .tag.stale{border-color:color-mix(in srgb,var(--err) 45%,transparent);background:color-mix(in srgb,var(--err) 8%,transparent);}
+    :root[data-carino-theme="color"] .tag.uncovered{border-color:color-mix(in srgb,var(--warn) 45%,transparent);background:color-mix(in srgb,var(--warn) 8%,transparent);}
+    :root[data-carino-theme="color"] .wt-table tbody tr.wt-uncov>*{background:color-mix(in srgb,var(--warn) 6%,transparent);}
+    :root[data-carino-theme="color"] .cs-btn.danger:hover,:root[data-carino-theme="color"] .wk-w-x:hover{background:color-mix(in srgb,var(--err) 8%,transparent);}
+    :root[data-carino-theme="color"] .wk-tab-x:hover{background:color-mix(in srgb,var(--err) 12%,transparent);}
+    /* floating surfaces: soft shadows and the theme scrim */
+    :root[data-carino-theme="color"] .modal,:root[data-carino-theme="color"] .cmdk,:root[data-carino-theme="color"] .learn-dlg,
+    :root[data-carino-theme="color"] .learn-pop,:root[data-carino-theme="color"] .learn-tour-card,:root[data-carino-theme="color"] .level-pop,
+    :root[data-carino-theme="color"] .wk-w-moving,:root[data-carino-theme="color"] .ws-side.open,:root[data-carino-theme="color"] .autocomplete{box-shadow:var(--ct-shadow-3);}
+    :root[data-carino-theme="color"] .toast,:root[data-carino-theme="color"] .cc-menu,:root[data-carino-theme="color"] .wk-picker,
+    :root[data-carino-theme="color"] .cp-pop,:root[data-carino-theme="color"] .wt-colmenu,:root[data-carino-theme="color"] .wk-popmenu{box-shadow:var(--ct-shadow-2);}
+    :root[data-carino-theme="color"] .learn-tour-hole{box-shadow:0 0 0 2px var(--accent),0 0 0 200vmax var(--ct-scrim);}
+    :root[data-carino-theme="color"] .scrim,:root[data-carino-theme="color"] .modal-scrim,:root[data-carino-theme="color"] .cmdk::backdrop,
+    :root[data-carino-theme="color"] .learn-dlg::backdrop,:root[data-carino-theme="color"] .learn-tour.centred{background:var(--ct-scrim);}
+    :root[data-carino-theme="color"] .ack-gate{background:color-mix(in srgb,var(--bg) 92%,transparent);}
+    :root[data-carino-theme="color"] .ack-brand{background-image:var(--gold-text);}
+    :root[data-carino-theme="color"] .ack-brand span{-webkit-text-fill-color:var(--text);}
+  </style>
 </head>
 <body>
   <!-- App controls; carino-navbar.js relocates this into the shared navbar. -->
@@ -579,6 +639,7 @@
   </div>
 
   <script src="carino-navbar.js" data-app="Stocks" defer></script>
+  <script src="carino-theme.js" data-mark="logo.svg" data-mark-color="logo-color.svg" defer></script>
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
   <script type="module" src="js/app.js"></script>

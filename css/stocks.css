@@ -56,7 +56,7 @@ a{color:var(--accent);}
 .btn.btn-primary.sm{height:30px;padding:0 12px;font-size:.74rem;}
 
 /* ---- market strip ---- */
-.market-strip{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:16px;
+.market-strip{position:sticky;top:var(--nav-h);z-index:40;display:flex;align-items:center;justify-content:space-between;gap:16px;
   flex-wrap:wrap;padding:8px 20px;background:linear-gradient(180deg,var(--bg-elev),var(--bg));border-bottom:1px solid var(--border);}
 .market-strip[hidden]{display:none;}
 .mkt-tiles{display:flex;gap:10px;flex-wrap:wrap;}
